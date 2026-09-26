@@ -19,8 +19,8 @@ final class VisionEngine: @unchecked Sendable {
 
   struct Detection {
     var face: FaceDetection?
-    var hands: [[Landmark]]
-    var pose: [Landmark]?
+    var hands: [[StudyCore.Landmark]]
+    var pose: [StudyCore.Landmark]?
     var segment: SegmentStats?
   }
 
@@ -84,7 +84,7 @@ final class VisionEngine: @unchecked Sendable {
     let handResult = try hand.detect(videoFrame: image, timestampInMilliseconds: ts)
     let hands = handResult.landmarks.map { $0.map(Self.landmark) }
 
-    var poseOut: [Landmark]?
+    var poseOut: [StudyCore.Landmark]?
     if withPose {
       let poseResult = try pose.detect(videoFrame: image, timestampInMilliseconds: ts)
       poseOut = poseResult.landmarks.first?.map(Self.landmark)
@@ -98,8 +98,8 @@ final class VisionEngine: @unchecked Sendable {
     return Detection(face: faceOut, hands: hands, pose: poseOut, segment: segment)
   }
 
-  private static func landmark(_ l: NormalizedLandmark) -> Landmark {
-    Landmark(x: Double(l.x), y: Double(l.y), z: Double(l.z), visibility: l.visibility?.doubleValue)
+  private static func landmark(_ l: NormalizedLandmark) -> StudyCore.Landmark {
+    StudyCore.Landmark(x: Double(l.x), y: Double(l.y), z: Double(l.z), visibility: l.visibility?.doubleValue)
   }
 }
 
