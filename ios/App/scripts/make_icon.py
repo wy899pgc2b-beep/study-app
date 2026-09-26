@@ -5,7 +5,9 @@
   - 上 7 割:エメラルドグリーンの横長の長方形に、平仮名で「つくえ」
     (文字の色は 白・黒・グレー・藍色 から選ぶ)
   - 下 3 割:黒い文字で「Log」
-文字は しっぽり明朝 B1 Bold(SIL Open Font License。初めて動かすときに google/fonts から取ってくる。リポジトリには入れない)。
+文字はアプリの画面と同じ Zen Maru Gothic(丸みがあって親しみやすい。SIL Open Font License。
+初めて動かすときに google/fonts から取ってくる。リポジトリには入れない)。
+「つくえ」はいちばん太い Black で、長方形の中にできる限り大きく入れる。「Log」は Bold。
 字と字のあいだは字の形の幅で測ってそろえ、それぞれの場所の真ん中に置く。
 2 倍の大きさ(2048)で描いて 1024 に縮め、ふちをなめらかにする。透明な部分は作らない(App Store の決まり)。
 
@@ -28,8 +30,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 APP = os.path.dirname(HERE)
 ICON = os.path.join(APP, "Resources/Assets.xcassets/AppIcon.appiconset/icon-1024.png")
 FONT_DIR = os.path.join(APP, ".icon-fonts")
-FONT = "ShipporiMinchoB1-Bold.ttf"
-FONT_URL = "https://raw.githubusercontent.com/google/fonts/main/ofl/shipporiminchob1/ShipporiMinchoB1-Bold.ttf"
+FONT_URL = "https://raw.githubusercontent.com/google/fonts/main/ofl/zenmarugothic/"
+TITLE_FONT = "ZenMaruGothic-Black.ttf"  # 「つくえ」
+LOG_FONT = "ZenMaruGothic-Bold.ttf"  # 「Log」
 
 S = 2048  # 描く大きさ(書き出しは 1024)
 SPLIT = 0.7  # 上 7 割と下 3 割の境
@@ -45,11 +48,11 @@ TEXT_COLORS = {
 }
 
 
-def font(size):
-    path = os.path.join(FONT_DIR, FONT)
+def font(name, size):
+    path = os.path.join(FONT_DIR, name)
     if not os.path.exists(path):
         os.makedirs(FONT_DIR, exist_ok=True)
-        urllib.request.urlretrieve(FONT_URL, path)
+        urllib.request.urlretrieve(FONT_URL + name, path)
     return ImageFont.truetype(path, round(size))
 
 
@@ -66,8 +69,8 @@ def band_box(band):
 def draw_spaced(d, text, size, center, gap_ratio, color, fit_width=None, fit_height=None):
     """字の形の幅で測って、字と字のあいだを等しくして並べる。行の上下は、字の形のいちばん上と下で測る。
     fit_width・fit_height を渡すと、その中に収まるいちばん大きい大きさにする"""
-    for _ in range(3):
-        f = font(size)
+    for _ in range(4):
+        f = font(TITLE_FONT, size)
         boxes = [f.getbbox(ch) for ch in text]
         gap = size * gap_ratio
         width = sum(b[2] - b[0] for b in boxes) + gap * (len(text) - 1)
@@ -87,10 +90,10 @@ def draw_log(d, center_y, cap_height):
     """「Log」。大文字の高さ(L の上から字の線まで)を cap_height にし、その真ん中を center_y に合わせる(g の下は線の下に出る)"""
     size = cap_height * 1.5
     for _ in range(3):
-        f = font(size)
+        f = font(LOG_FONT, size)
         l_box = f.getbbox("L")
         size *= cap_height / (l_box[3] - l_box[1])
-    f = font(size)
+    f = font(LOG_FONT, size)
     l_box = f.getbbox("L")
     full = f.getbbox("Log")
     x = S / 2 - (full[2] + full[0]) / 2
@@ -104,9 +107,10 @@ def render(text_color="white", band="inset"):
     box = band_box(band)
     d.rectangle(box, fill=EMERALD)
     bw, bh = box[2] - box[0], box[3] - box[1]
+    # できる限り大きく:長方形の幅から、左右に少しだけ余白を残す
     draw_spaced(
-        d, "つくえ", S * 0.2, ((box[0] + box[2]) / 2, (box[1] + box[3]) / 2), 0.14, TEXT_COLORS[text_color],
-        fit_width=bw * (0.8 if band == "inset" else 0.66), fit_height=bh * (0.56 if band == "inset" else 0.36))
+        d, "つくえ", S * 0.2, ((box[0] + box[2]) / 2, (box[1] + box[3]) / 2), 0.04, TEXT_COLORS[text_color],
+        fit_width=bw * (0.88 if band == "inset" else 0.8), fit_height=bh * (0.8 if band == "inset" else 0.6))
     draw_log(d, S * (SPLIT + (1 - SPLIT) / 2) - S * 0.012, S * 0.105)
     return img.resize((1024, 1024), Image.LANCZOS)
 
