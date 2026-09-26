@@ -1,0 +1,52 @@
+# 判定の中心のテスト。push のたびに Linux で動かす。
+# - prototype:試作品のテストと、Config.swift が試作品のしきい値と同じか
+# - studycore:Swift の StudyCore が試作品と同じ判定になるか(Fixtures/*.json との突き合わせ)
+name: core-tests
+
+on:
+  push:
+    paths:
+      - 'prototype/**'
+      - 'ios/StudyCore/**'
+      - '.github/workflows/core-tests.yml'
+  workflow_dispatch:
+
+# 公開リポジトリなので、Actions が使える権限は読み取りだけにする
+permissions:
+  contents: read
+
+jobs:
+  prototype:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Prototype tests
+        working-directory: prototype
+        run: npm test
+      - name: Config.swift matches prototype/js/config.js
+        working-directory: prototype
+        run: |
+          node tools/gen-swift-config.mjs
+          git diff --exit-code -- ../ios/StudyCore/Sources/StudyCore/Config.swift
+
+  studycore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - name: Find Swift
+        id: swift
+        run: echo "found=$(command -v swift >/dev/null && echo yes || echo no)" >> "$GITHUB_OUTPUT"
+      - name: Install Swift
+        if: steps.swift.outputs.found == 'no'
+        uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: '6.0'
+      - run: swift --version
+      - name: StudyCore tests
+        working-directory: ios/StudyCore
+        run: swift test

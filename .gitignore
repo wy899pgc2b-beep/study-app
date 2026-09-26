@@ -1,0 +1,18 @@
+# 公開リポジトリ。学習の記録や撮影から作ったデータは入れない
+# (結果画面・検証モードで書き出した JSON は、ここに置かない)
+*.session.json
+*-export.json
+exports/
+recordings/
+
+# ビルド
+.build/
+.swiftpm/
+build/
+DerivedData/
+xcuserdata/
+*.xcworkspace/xcuserdata/
+Pods/
+node_modules/
+
+.DS_Store
