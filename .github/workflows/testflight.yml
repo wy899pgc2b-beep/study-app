@@ -184,7 +184,7 @@ jobs:
           # 送るときに App Store Connect が確かめる項目を、ここでも見ておく
           test -f "$APP/PrivacyInfo.xcprivacy"
           test -f "$APP/Assets.car"
-          /usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "$APP/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName' "$APP/Info.plist"
           /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Info.plist"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Info.plist")" = "$BUILD_NUMBER"
           /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist"
