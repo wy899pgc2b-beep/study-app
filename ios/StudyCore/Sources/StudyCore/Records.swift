@@ -120,6 +120,45 @@ public struct UsageEvent: Codable, Equatable, Sendable {
   }
 }
 
+/// 端末に保存した記録の書き出し(設定の「記録を書き出す」)。α 版の協力者が 1 週間ごとに送る(MVP の設計 7 章)。
+/// 時刻・時間・回数・スコアだけで、映像・画像・特徴点は含めない
+public struct RecordsExport: Encodable, Sendable {
+  public var version = 1
+  public var app = "ツクエログ"
+  public var appVersion: String
+  public var exportedAt: Date
+  /// 学年(オンボーディングで選んだもの。選んでいなければ nil)
+  public var grade: String?
+  public var sessions: [SessionRecord]
+  public var minutes: [MinuteRow]
+  public var events: [EventRow]
+  public var intervals: [IntervalRow]
+  public var usage: [UsageEvent]
+
+  public init(
+    appVersion: String, exportedAt: Date, grade: String?, sessions: [SessionRecord], minutes: [MinuteRow], events: [EventRow],
+    intervals: [IntervalRow], usage: [UsageEvent]
+  ) {
+    self.appVersion = appVersion
+    self.exportedAt = exportedAt
+    self.grade = grade
+    self.sessions = sessions
+    self.minutes = minutes
+    self.events = events
+    self.intervals = intervals
+    self.usage = usage
+  }
+
+  /// 読みやすい JSON
+  public func json() throws -> Data {
+    let enc = JSONEncoder()
+    enc.outputFormatting = [.prettyPrinted, .sortedKeys]
+    enc.dateEncodingStrategy = .iso8601
+    enc.nonConformingFloatEncodingStrategy = .convertToString(positiveInfinity: "Infinity", negativeInfinity: "-Infinity", nan: "NaN")
+    return try enc.encode(self)
+  }
+}
+
 // MARK: - 学習日と合計
 
 public enum StudyDay {

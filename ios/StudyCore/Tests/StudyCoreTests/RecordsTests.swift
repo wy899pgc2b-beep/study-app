@@ -81,6 +81,20 @@ final class RecordsTests: XCTestCase {
     XCTAssertEqual(try JSONDecoder().decode(EventRow.self, from: JSONEncoder().encode(row)), row)
   }
 
+  func testRecordsExportHasOnlyTheListedTables() throws {
+    let s = session("2026-09-26", focus: 12.5)
+    let export = RecordsExport(
+      appVersion: "0.1.0", exportedAt: Date(timeIntervalSince1970: 0), grade: "high3", sessions: [s], minutes: [],
+      events: [EventRow(sessionId: s.id, type: .awayStart, at: s.startedAt)], intervals: [],
+      usage: [UsageEvent(name: "session_start", at: s.startedAt, properties: ["timer": "25_5"])])
+    let obj = try JSONDecoder().decode(JSONValue.self, from: export.json())
+    guard case .object(let o) = obj else { return XCTFail("object") }
+    XCTAssertEqual(
+      Set(o.keys), ["version", "app", "appVersion", "exportedAt", "grade", "sessions", "minutes", "events", "intervals", "usage"])
+    guard case .string(let at) = o["exportedAt"] else { return XCTFail("exportedAt") }
+    XCTAssertEqual(at, "1970-01-01T00:00:00Z")
+  }
+
   func testSessionIntervals() {
     var s = StudySession(breakTimer: BreakTimer(enabled: false))
     _ = s.beginRitual(at: 0)

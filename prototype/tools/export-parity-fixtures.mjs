@@ -18,6 +18,7 @@ import {
   scoreMinute,
 } from '../js/analysis.js';
 import { segmentStats } from '../js/vision.js';
+import { SCENARIO, DIAGNOSTIC_METRICS, evaluatePhase, phaseAt, scenarioTotalSec } from '../js/scenario.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const OUT = join(here, '../../ios/StudyCore/Tests/StudyCoreTests/Fixtures');
@@ -135,6 +136,9 @@ process.on('exit', () => {
   // --- 4. 髪・顔の肌・人の面積(vision.js の segmentStats)。分類の番号を並べた画像を乱数で作る
   writeFileSync(join(OUT, 'vision.json'), JSON.stringify({ appVersion: APP_VERSION, segment: segmentCases() }));
 
+  // --- 5. 検証シナリオの採点(scenario.js の evaluatePhase と phaseAt)
+  writeFileSync(join(OUT, 'scenario.json'), JSON.stringify({ appVersion: APP_VERSION, ...scenarioCases() }));
+
   const frameCount = used.reduce((n, s) => n + s.ops.filter((o) => o.f).length, 0);
   console.error(`[export] sessions ${used.length}, frames ${frameCount}, calibration ${calCases.length}, framing ${framingCases.length}, recorder ${recorderCases.length} → ${OUT}`);
 });
@@ -176,6 +180,62 @@ function segmentCases() {
     cases.push({ width: w, height: h, step, mask: Buffer.from(mask).toString('base64'), stats: roundOut(segmentStats(mask, w, h, step)) });
   }
   return cases;
+}
+
+// 検証シナリオの採点の例:場面ごとに、判定の結果の列を乱数で作る。
+// Swift で読みやすいよう、閉眼の理由(metrics.closedBy)は metrics の外に出して保存する
+function scenarioCases() {
+  const r = mulberry32(2024);
+  const pick = (xs) => xs[Math.floor(r() * xs.length)];
+  const STATES = ['work', 'think', 'lookaway', 'drowsy', 'sleep', 'absent'];
+  const FLAGS = ['faceVisible', 'eyesClosed', 'penGrip', 'dozeShadow', 'lookingDown', 'segHead', 'writing'];
+  const phases = [];
+  SCENARIO.forEach((phase, pi) => {
+    for (let k = 0; k < 5; k++) {
+      const setup = ['stand', 'landscape', 'flat'][k % 3];
+      const bias = pick(STATES);
+      const n = k === 4 ? 8 : 40 + Math.floor(r() * 120);
+      const jsSamples = [];
+      const swiftSamples = [];
+      let el = 0;
+      for (let i = 0; i < n; i++) {
+        const dt = k === 4 ? 0.1 : Math.round((0.15 + r() * 0.12) * 1000) / 1000;
+        el += dt;
+        const state = r() < 0.6 ? bias : pick(STATES);
+        const away = state === 'absent' && r() < 0.5;
+        const flags = { tooClose: r() < 0.4, writing: r() < 0.3, habit: r() < 0.1 };
+        const events = r() < 0.08 ? [pick(['habit_face', 'habit_head', 'chin_rest', 'lookaway'])] : [];
+        let metrics = null;
+        let closedBy = null;
+        if (r() > 0.1) {
+          metrics = {};
+          for (const key of DIAGNOSTIC_METRICS) {
+            const u = r();
+            if (u < 0.15) continue;
+            metrics[key] = u < 0.22 ? null : Math.round((r() * 2 - 0.5) * 1e6) / 1e6;
+          }
+          for (const key of FLAGS) {
+            const u = r();
+            metrics[key] = u < 0.1 ? null : u < 0.55 ? 1 : 0;
+          }
+          closedBy = pick(['ear', 'earBlink', 'blink', 'down', 'personal', null, null]);
+          metrics.closedBy = closedBy;
+        }
+        const phaseElapsed = Math.min(el, phase.sec - 0.01);
+        jsSamples.push({ phaseElapsed, dt, state, away, flags, metrics, events });
+        const sm = metrics == null ? null : Object.fromEntries(Object.entries(metrics).filter(([key]) => key !== 'closedBy'));
+        swiftSamples.push({ phaseElapsed, dt, state, away, flags, metrics: sm, closedBy, events });
+      }
+      phases.push({ phase: pi, setup, samples: swiftSamples, result: roundOut(evaluatePhase(phase, jsSamples, { setup })) });
+    }
+  });
+  const total = scenarioTotalSec();
+  const at = [];
+  for (let e = 0; e <= total + 3; e += 1.7) {
+    const p = phaseAt(e);
+    at.push({ elapsed: e, index: p ? p.index : null, inTransition: p ? p.inTransition : null, phaseElapsed: p ? roundOut(p.phaseElapsed) : null });
+  }
+  return { phases, phaseAt: at, totalSec: total };
 }
 
 // 特徴量の計算の例:顔(478 点と表情係数)、手、上半身、髪の面積を、乱数で少しずつ変えて作る
