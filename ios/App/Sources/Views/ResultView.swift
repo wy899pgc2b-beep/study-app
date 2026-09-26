@@ -18,6 +18,17 @@ struct ResultView: View {
               LabeledContent("学習時間", value: minutes(card.studyMin * 60)).font(.footnote)
               Text(card.nextStep)
             }
+            // 体感の 1 タップ(任意。設計書 3.14)
+            Section("自分の感覚では、どうだった?") {
+              HStack {
+                ForEach(SelfRating.allCases, id: \.self) { rating in
+                  Button(label(rating)) { model.runner.setSelfRating(rating) }
+                    .buttonStyle(.bordered)
+                    .tint(model.runner.record?.selfRating == rating ? Color.accentColor : Color.secondary)
+                    .frame(maxWidth: .infinity)
+                }
+              }
+            }
           }
           Section("時間の内訳") {
             LabeledContent("学習", value: minutes(s.studySec))
@@ -30,6 +41,15 @@ struct ResultView: View {
         Button("ホームに戻る") { model.backHome() }
       }
       .navigationTitle("結果")
+      .onAppear { model.runner.resultCardViewed() }
+    }
+  }
+
+  private func label(_ r: SelfRating) -> String {
+    switch r {
+    case .good: return "集中できた"
+    case .normal: return "ふつう"
+    case .poor: return "いまいち"
     }
   }
 

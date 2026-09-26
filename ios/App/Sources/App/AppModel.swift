@@ -34,7 +34,25 @@ enum Screen: Equatable {
 final class AppModel {
   var screen: Screen = .home
   private(set) var settings = StudySettings.load()
-  let runner = SessionRunner()
+  /// 端末の DB。開けなかったときは記録を保存せずに動く
+  let store: Store?
+  let runner: SessionRunner
+  /// 今日の学習日の合計(ホームに出す)
+  private(set) var today: DayTotal?
+
+  init() {
+    let store = try? Store()
+    self.store = store
+    runner = SessionRunner(store: store)
+    // 前回、計測中にアプリが強制終了されていたら、それまでの記録を締める
+    store?.recoverUnfinished()
+    refreshToday()
+  }
+
+  func refreshToday() {
+    let date = StudyDay.studyDate(Date())
+    today = dayTotals(store?.sessions(since: date) ?? [], dates: [date]).first
+  }
 
   func update(_ change: (inout StudySettings) -> Void) {
     var s = settings
@@ -55,6 +73,7 @@ final class AppModel {
   }
 
   func backHome() {
+    refreshToday()
     screen = .home
   }
 }

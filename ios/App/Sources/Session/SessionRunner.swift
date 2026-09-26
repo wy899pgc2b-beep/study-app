@@ -37,6 +37,13 @@ final class SessionRunner {
   }
 
   private var session: StudySession?
+  private let store: Store?
+  /// 保存している学習の記録(計測を始めてから)
+  private(set) var record: SessionRecord?
+  private var wallStart = Date()
+  private var tStart = 0.0
+  private var savedMinutes = 0
+  private var savedIntervals = 0
   private var camera: CameraSource?
   private var pipeline: FramePipeline?
   private let motion = MotionSensor()
@@ -46,13 +53,23 @@ final class SessionRunner {
   private var breakTimer: Timer?
   private var lastDrowsyChimeT: Double?
 
+  init(store: Store?) {
+    self.store = store
+  }
+
   static func now() -> Double { CACurrentMediaTime() * 1000 }
+
+  /// 解析の時刻(ミリ秒)を、壁時計の時刻にする
+  private func wall(_ t: Double) -> Date { wallStart.addingTimeInterval((t - tStart) / 1000) }
 
   func start(settings: StudySettings) async {
     guard status == .idle || isFailed else { return }
     status = .preparing
     summary = nil
     card = nil
+    record = nil
+    savedMinutes = 0
+    savedIntervals = 0
     guard await CameraSource.requestAccess() else {
       status = .failed("カメラの使用が許可されていません。設定アプリで許可すると、判定を使えます")
       return
@@ -92,6 +109,7 @@ final class SessionRunner {
   /// 位置合わせを省いて、開始の儀式に進む
   func skipGuide() {
     guard phase == .guide, let cues = session?.beginRitual(at: Self.now()) else { return }
+    usage("ritual_skipped")
     phase = session?.phase
     handle(cues)
   }
@@ -101,11 +119,15 @@ final class SessionRunner {
     session?.pause(at: Self.now(), reason: reason)
     phase = session?.phase
     sound.stopAlarm()
+    usage("session_pause", ["reason": reason == .touch ? "touch" : "app"])
   }
 
   func resume() {
+    guard session?.isPaused == true else { return }
     session?.resume(at: Self.now())
     phase = session?.phase
+    usage("session_resume")
+    persistProgress()
   }
 
   func endBreak() {
@@ -115,6 +137,8 @@ final class SessionRunner {
     let cues = session?.endBreak(at: Self.now()) ?? []
     phase = session?.phase
     camera?.start()
+    usage("break_end")
+    persistProgress()
     handle(cues)
   }
 
@@ -122,8 +146,27 @@ final class SessionRunner {
   @discardableResult
   func finish() -> SessionSummary? {
     let result = session?.finish(at: Self.now())
-    if let result, let s = session {
-      card = Self.makeCard(result, session: s)
+    if let result, let s = session, var rec = record {
+      let previous = store?.latestFinished()
+      let recent = recentFocusMin(store?.sessions(since: StudyDay.recentDates(7, until: Date()).first ?? "") ?? [], excluding: rec.id, now: Date())
+      let input = ResultCardInput(
+        summary: result, events: s.recorder?.events ?? [], pauseCount: s.pauseCount, recentFocusMin: recent,
+        previousPraise: previous?.praise, previousNextStep: previous?.nextStep)
+      let c = buildResultCard(input)
+      card = c
+      rec.apply(result, breakSec: s.breakSec, deviceUseCount: s.pauseCount)
+      rec.endedAt = Date()
+      rec.endReason = .manual
+      rec.praise = c.praise
+      rec.nextStep = c.nextStep
+      record = rec
+      persistProgress(final: true)
+      usage(
+        "session_complete",
+        [
+          "studyMin": String(Int(result.studySec / 60)), "focusMin": String(Int(result.effectiveFocusMin)),
+          "avgFocus": result.avgFocus.map(String.init) ?? "", "breakMin": String(Int(s.breakSec / 60)),
+        ])
       sound.gentle()
     }
     stopDevices()
@@ -134,17 +177,64 @@ final class SessionRunner {
     return result
   }
 
-  /// 結果カードを作り、次に同じ文を続けないよう覚えておく
-  private static func makeCard(_ summary: SessionSummary, session: StudySession) -> ResultCard {
-    let defaults = UserDefaults.standard
-    // 過去 7 日の集中時間は、端末の DB を作ってから渡す(今は比べる記録がない)
-    let input = ResultCardInput(
-      summary: summary, events: session.recorder?.events ?? [], pauseCount: session.pauseCount, recentFocusMin: [],
-      previousPraise: defaults.string(forKey: "lastPraise"), previousNextStep: defaults.string(forKey: "lastNextStep"))
-    let card = buildResultCard(input)
-    defaults.set(card.praise, forKey: "lastPraise")
-    defaults.set(card.nextStep, forKey: "lastNextStep")
-    return card
+  /// 体感の 1 タップ(設計書 3.14。任意)
+  func setSelfRating(_ rating: SelfRating) {
+    guard var rec = record else { return }
+    rec.selfRating = rating
+    record = rec
+    store?.setSelfRating(rating, sessionId: rec.id)
+    usage("self_rating", ["value": rating.rawValue])
+  }
+
+  func resultCardViewed() {
+    if record != nil { usage("result_card_view") }
+  }
+
+  /// 計測を始めたときに、学習の記録を作って保存する
+  private func createRecord() {
+    guard let s = session, let t0 = s.startT else { return }
+    wallStart = Date()
+    tStart = t0
+    let timer = s.breakTimer
+    let preset =
+      !timer.enabled ? "none" : timer.studyMin == 25 && timer.breakMin == 5 ? "25_5" : timer.studyMin == 50 && timer.breakMin == 10 ? "50_10" : "custom"
+    let rec = SessionRecord(studyDate: StudyDay.studyDate(wallStart), startedAt: wallStart, setup: s.setup, timerPreset: preset)
+    record = rec
+    store?.save(rec)
+    usage("session_start", ["timer": preset])
+  }
+
+  /// 終わった分の記録、一時停止・休憩の区間を保存する。final のときは、途中の分と学習の集計も保存する
+  private func persistProgress(final: Bool = false) {
+    guard let s = session, var rec = record, let recorder = s.recorder else { return }
+    let done = final ? recorder.minutes.count : Swift.max(0, recorder.minutes.count - 1)
+    if done > savedMinutes || final {
+      // 最後は全部の分を保存し直す(離席の出来事は、始まった分にさかのぼって数えるため)
+      let scores = recorder.scores()
+      let from = final ? 0 : savedMinutes
+      let rows = (from..<done).map { MinuteRow(sessionId: rec.id, minute: recorder.minutes[$0], focusPct: scores[$0]) }
+      store?.save(minutes: rows)
+      savedMinutes = done
+      if !final {
+        // 強制終了されても残るよう、休憩と一時停止の回数も書いておく
+        rec.breakSec = s.breakSec
+        rec.deviceUseCount = s.pauseCount
+        record = rec
+        store?.save(rec)
+      }
+    }
+    if s.intervals.count > savedIntervals {
+      let rows = s.intervals[savedIntervals...].map {
+        IntervalRow(sessionId: rec.id, kind: $0.kind, startedAt: wall($0.startT), endedAt: wall($0.endT))
+      }
+      store?.add(intervals: Array(rows))
+      savedIntervals = s.intervals.count
+    }
+    if final { store?.save(rec) }
+  }
+
+  private func usage(_ name: String, _ properties: [String: String] = [:]) {
+    store?.log(UsageEvent(name: name, at: Date(), properties: properties))
   }
 
   private var isFailed: Bool {
@@ -183,6 +273,7 @@ final class SessionRunner {
     debug.rotation = result.rotation.rawValue
     if let out = session?.lastOutput { debug.state = out.away ? "離席中" : out.state.label }
     handle(cues)
+    persistProgress()
   }
 
   private func handle(_ cues: [SessionCue]) {
@@ -193,6 +284,7 @@ final class SessionRunner {
       case .guide(let prompt):
         voice.say(prompt.speech)
       case .guideReady:
+        usage("ritual_start")
         sound.ok()
         voice.say("位置はOKです", interrupt: true)
       case .ritual(.closeEyes):
@@ -208,6 +300,8 @@ final class SessionRunner {
       case .closedReferenceMissing:
         voice.say("目を閉じたときの記録ができませんでした。このまま始めます")
       case .started:
+        createRecord()
+        usage("ritual_complete")
         sound.gentle()
         voice.say("学習を始めます")
       case .resumed:
@@ -220,6 +314,7 @@ final class SessionRunner {
         voice.say("休憩の時間が終わりました。準備ができたら、休憩を終えるを押してください")
       case .event(let ev):
         debug.lastEvent = ev.type.rawValue
+        if let rec = record { store?.add(events: [EventRow(sessionId: rec.id, type: ev.type, at: wall(ev.t))]) }
         notify(ev)
       }
     }
@@ -231,6 +326,7 @@ final class SessionRunner {
     camera?.stop()
     sound.stopAlarm()
     sound.gentle()
+    usage("break_start")
     voice.say("休憩の時間です。\(minutes)分休みましょう", interrupt: true)
     breakEndsAt = Date().addingTimeInterval(Double(minutes) * 60)
     breakTimer?.invalidate()

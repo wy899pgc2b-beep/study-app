@@ -86,6 +86,13 @@ public struct BreakTimer: Equatable, Codable, Sendable {
   public static let presets = [BreakTimer(enabled: true, studyMin: 25, breakMin: 5), BreakTimer(enabled: true, studyMin: 50, breakMin: 10)]
 }
 
+/// 一時停止・休憩の区間(ミリ秒)
+public struct SessionInterval: Equatable, Sendable {
+  public var kind: IntervalRow.Kind
+  public var startT: Double
+  public var endT: Double
+}
+
 public struct StudySession: Sendable {
   public let cfg: AnalysisConfig
   public let setup: SetupStyle
@@ -105,6 +112,8 @@ public struct StudySession: Sendable {
   /// 画面に触れた・アプリを離れた回数
   public private(set) var pauseCount = 0
   public private(set) var startT: Double?
+  /// 終わった一時停止・休憩の区間
+  public private(set) var intervals: [SessionInterval] = []
 
   private var analyzer: Analyzer
   private var guide: PlacementGuide
@@ -118,6 +127,7 @@ public struct StudySession: Sendable {
   private var breakOverSent = false
   /// 休憩の後の位置の確認中(儀式は姿勢の記録だけにする)
   private var returningFromBreak = false
+  private var openInterval: SessionInterval?
 
   public init(
     cfg: AnalysisConfig = AnalysisConfig(), setup: SetupStyle = .landscape, autoAway: Bool = true, measuredEyeDeskCm: Double? = 35,
@@ -183,19 +193,23 @@ public struct StudySession: Sendable {
     closeSpan(at: t, studying: true)
     phase = .paused(reason)
     pauseCount += 1
+    openInterval = SessionInterval(kind: reason == .touch ? .pausedTouch : .pausedApp, startT: t, endT: t)
   }
 
   public mutating func resume(at t: Double) {
     guard case .paused = phase else { return }
     closeSpan(at: t, studying: false)
     phase = .studying
+    closeInterval(at: t)
   }
 
   public mutating func startBreak(at t: Double) {
     guard phase == .studying || isPaused else { return }
     closeSpan(at: t, studying: !isPaused)
+    closeInterval(at: t)
     phase = .onBreak
     breakStartT = t
+    openInterval = SessionInterval(kind: .breakTime, startT: t, endT: t)
     breakOverSent = false
   }
 
@@ -204,6 +218,7 @@ public struct StudySession: Sendable {
     guard phase == .onBreak, let bs = breakStartT else { return [] }
     breakSec += Swift.max(0, (t - bs) / 1000)
     breakStartT = nil
+    closeInterval(at: t)
     studySinceBreak = 0
     returningFromBreak = true
     return beginGuide(at: t)
@@ -220,8 +235,16 @@ public struct StudySession: Sendable {
       breakStartT = nil
     default: break
     }
+    closeInterval(at: t)
     phase = .finished
     return recorder?.summary()
+  }
+
+  private mutating func closeInterval(at t: Double) {
+    guard var open = openInterval else { return }
+    open.endT = t
+    intervals.append(open)
+    openInterval = nil
   }
 
   public var isPaused: Bool {

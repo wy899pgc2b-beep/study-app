@@ -13,6 +13,10 @@ settings:
 packages:
   StudyCore:
     path: ../StudyCore
+  # 端末の DB(SQLite)
+  GRDB:
+    url: https://github.com/groue/GRDB.swift
+    from: 7.0.0
 targets:
   StudyApp:
     type: application
@@ -25,6 +29,7 @@ targets:
         buildPhase: resources
     dependencies:
       - package: StudyCore
+      - package: GRDB
     info:
       path: Generated/Info.plist
       properties:

@@ -21,6 +21,13 @@ struct HomeView: View {
           .listRowInsets(EdgeInsets())
         }
 
+        if let today = model.today, today.studySec > 0 {
+          Section("今日") {
+            LabeledContent("集中時間", value: "\(Int(today.focusMin.rounded()))分")
+            LabeledContent("机に向かった時間", value: "\(Int((today.studySec / 60).rounded()))分")
+          }
+        }
+
         Section("休憩タイマー") {
           Toggle("休憩タイマーを使う", isOn: binding(\.breakTimer.enabled))
           if settings.breakTimer.enabled {
