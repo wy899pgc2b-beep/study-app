@@ -40,13 +40,16 @@ public struct SessionRecord: Codable, Equatable, Sendable, Identifiable {
   /// 結果カードの文(次に同じ文を続けないため、ホームに「今日の一手」を出すため)
   public var praise: String?
   public var nextStep: String?
+  /// 学習項目(数学、英単語など)。選んでいなければ nil
+  public var subject: String?
 
-  public init(id: UUID = UUID(), studyDate: String, startedAt: Date, setup: SetupStyle, timerPreset: String) {
+  public init(id: UUID = UUID(), studyDate: String, startedAt: Date, setup: SetupStyle, timerPreset: String, subject: String? = nil) {
     self.id = id
     self.studyDate = studyDate
     self.startedAt = startedAt
     self.setup = setup
     self.timerPreset = timerPreset
+    self.subject = subject
   }
 }
 

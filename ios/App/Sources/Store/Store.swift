@@ -91,6 +91,10 @@ final class Store {
         t.column("properties", .text).notNull()
       }
     }
+    // 学習項目(数学、英単語など)。前の版で作った DB には、列を足す
+    m.registerMigration("v2") { db in
+      try db.alter(table: "session") { t in t.add(column: "subject", .text) }
+    }
     return m
   }
 
@@ -154,6 +158,14 @@ final class Store {
   func sessions(since studyDate: String) -> [SessionRecord] {
     read { db in
       try SessionRecord.filter(Column("studyDate") >= studyDate).filter(Column("endedAt") != nil).order(Column("startedAt")).fetchAll(db)
+    } ?? []
+  }
+
+  /// 最近の学習の学習項目(新しい順。候補を並べるのに使う)
+  func recentSubjects(limit: Int = 30) -> [String] {
+    read { db in
+      try String.fetchAll(
+        db, sql: "SELECT subject FROM session WHERE subject IS NOT NULL ORDER BY startedAt DESC LIMIT ?", arguments: [limit])
     } ?? []
   }
 

@@ -66,6 +66,8 @@ final class SessionRunner {
   private(set) var soundMode: SoundMode = .voice
   private let vibrator = Vibrator()
   private var lastNudgeT: Double?
+  /// この学習の学習項目
+  private(set) var subject: String?
   // 熱と電池(MVP の設計 5 章「端末の制御」)
   private var baseFps = 5.0
   private var thermal: ThermalLevel = .nominal
@@ -130,6 +132,7 @@ final class SessionRunner {
     scenarioCompleted = []
     scenarioRemaining = []
     soundMode = mode == .scenario ? .voice : settings.soundMode
+    subject = mode == .scenario ? nil : settings.subject
     lastNudgeT = nil
     scenarioPosition = nil
     scenarioResults = nil
@@ -364,7 +367,8 @@ final class SessionRunner {
     let timer = s.breakTimer
     let preset =
       !timer.enabled ? "none" : timer.studyMin == 25 && timer.breakMin == 5 ? "25_5" : timer.studyMin == 50 && timer.breakMin == 10 ? "50_10" : "custom"
-    let rec = SessionRecord(studyDate: StudyDay.studyDate(wallStart), startedAt: wallStart, setup: s.setup, timerPreset: preset)
+    let rec = SessionRecord(
+      studyDate: StudyDay.studyDate(wallStart), startedAt: wallStart, setup: s.setup, timerPreset: preset, subject: subject)
     record = rec
     store?.save(rec)
     usage("session_start", ["timer": preset])
@@ -499,7 +503,8 @@ final class SessionRunner {
     perf.lowPowerMode = lowPowerAtStart
     let export = SessionExport(
       appVersion: Self.appVersion, createdAt: wallStart, reason: reason, mode: mode.rawValue, session: s, summary: summary,
-      durationSec: (endT - t0) / 1000, scenario: scenarioResults, scenarioRemaining: mode == .scenario ? scenarioRemaining : nil, perf: perf)
+      durationSec: (endT - t0) / 1000, scenario: scenarioResults, scenarioRemaining: mode == .scenario ? scenarioRemaining : nil, perf: perf,
+      subject: subject)
     do {
       let f = DateFormatter()
       f.locale = Locale(identifier: "en_US_POSIX")

@@ -12,13 +12,14 @@ struct ResultView: View {
       PaperBackground()
       ScrollView {
         VStack(alignment: .leading, spacing: 18) {
-          Text("\(Wording.day(runner.record?.startedAt ?? Date()))の記録").font(AppFont.regular(14)).foregroundStyle(Palette.subInk)
+          Text("\(runner.subject.map { "\($0)・" } ?? "")\(Wording.day(runner.record?.startedAt ?? Date()))の記録")
+            .font(AppFont.regular(14)).foregroundStyle(Palette.subInk)
           if let results = runner.scenarioResults {
             scenarioCard(results)
           } else if let s = runner.summary, let card = runner.card {
             mainCard(card)
             waveCard(s)
-            chips(s)
+            breakdownCard(s)
             nextStepNote(card.nextStep)
             selfRating(card)
           } else {
@@ -90,21 +91,58 @@ struct ResultView: View {
     .card()
   }
 
-  private func chips(_ s: SessionSummary) -> some View {
+  /// 時間の内訳(MVP の設計 S-08):集中・学習・離席・一時停止・休憩を 1 本の帯と分で見せる
+  private func breakdownCard(_ s: SessionSummary) -> some View {
     let rec = model.runner.record
-    let items = [
-      "離席 \(Wording.minutes(s.awaySec))",
-      "スマホに触れた \(rec?.deviceUseCount ?? 0)回",
-      "休憩 \(Wording.minutes(rec?.breakSec ?? 0))",
-    ]
-    return HStack(spacing: 8) {
-      ForEach(items, id: \.self) { item in
-        Text(item)
-          .font(AppFont.regular(14))
-          .padding(.horizontal, 12)
-          .padding(.vertical, 8)
-          .background(Color.white, in: Capsule())
+    let slices = timeBreakdown(s, breakSec: rec?.breakSec ?? 0).filter { $0.sec >= 1 }
+    let total = Swift.max(1, slices.reduce(0) { $0 + $1.sec })
+    return VStack(alignment: .leading, spacing: 10) {
+      Text("時間の内訳").font(AppFont.bold(15))
+      GeometryReader { geo in
+        let usable = geo.size.width - CGFloat(Swift.max(0, slices.count - 1)) * 2
+        HStack(spacing: 2) {
+          ForEach(slices, id: \.kind) { slice in
+            RoundedRectangle(cornerRadius: 4)
+              .fill(sliceColor(slice.kind))
+              .frame(width: usable * CGFloat(slice.sec / total))
+          }
+        }
       }
+      .frame(height: 16)
+      .accessibilityHidden(true)
+      VStack(spacing: 6) {
+        ForEach(slices, id: \.kind) { slice in
+          HStack(spacing: 8) {
+            Circle().fill(sliceColor(slice.kind)).frame(width: 10, height: 10)
+            Text(sliceLabel(slice.kind)).font(AppFont.regular(14))
+            Spacer()
+            Text(Wording.minutes(slice.sec)).font(AppFont.medium(14))
+          }
+          .accessibilityElement(children: .combine)
+        }
+      }
+      Text("スマホに触れた \(rec?.deviceUseCount ?? 0)回").font(AppFont.regular(13)).foregroundStyle(Palette.subInk)
+    }
+    .card()
+  }
+
+  private func sliceColor(_ kind: TimeSlice.Kind) -> Color {
+    switch kind {
+    case .focus: return Palette.focus
+    case .study: return Palette.barSoft
+    case .away: return Palette.lampGlow
+    case .paused: return Color(hex: 0xB9C4D0)
+    case .breakTime: return Palette.sticky
+    }
+  }
+
+  private func sliceLabel(_ kind: TimeSlice.Kind) -> String {
+    switch kind {
+    case .focus: return "集中"
+    case .study: return "学習(集中以外)"
+    case .away: return "離席"
+    case .paused: return "一時停止"
+    case .breakTime: return "休憩"
     }
   }
 

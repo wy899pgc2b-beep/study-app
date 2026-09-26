@@ -6,6 +6,9 @@ struct HomeView: View {
   @Environment(AppModel.self) private var model
   @State private var customTimer = false
   @State private var showSettings = false
+  @State private var showSubjectPicker = false
+  /// 学習項目を選んだら、そのまま始める(初めての学習のとき)
+  @State private var startAfterPick = false
 
   var body: some View {
     let settings = model.settings
@@ -23,8 +26,15 @@ struct HomeView: View {
           }
           breakTimerCard(settings)
           SoundModeCard()
+          subjectRow
           Button {
-            model.beginFromHome()
+            // 初めての学習では、学習項目を 1 つ選んでから始める(設計書 3.20 の要件 5)
+            if model.settings.subject == nil {
+              startAfterPick = true
+              showSubjectPicker = true
+            } else {
+              model.beginFromHome()
+            }
           } label: {
             Label("机に向かう", systemImage: "lamp.desk.fill")
           }
@@ -47,6 +57,20 @@ struct HomeView: View {
     }
     .foregroundStyle(Palette.ink)
     .sheet(isPresented: $showSettings) { SettingsSheet() }
+    .sheet(
+      isPresented: $showSubjectPicker,
+      onDismiss: {
+        if startAfterPick {
+          startAfterPick = false
+          if model.settings.subject != nil { model.beginFromHome() }
+        }
+      }
+    ) {
+      SubjectPicker { name in
+        model.chooseSubject(name)
+        showSubjectPicker = false
+      }
+    }
   }
 
   private var header: some View {
@@ -84,6 +108,28 @@ struct HomeView: View {
           .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(hex: 0x9A6A12), lineWidth: 2))
       }
     }
+  }
+
+  /// 学習項目(前回のものを引き継ぐ。変えるときだけ選び直す。設計書 3.1 の要件 1)
+  private var subjectRow: some View {
+    Button {
+      showSubjectPicker = true
+    } label: {
+      HStack(spacing: 10) {
+        Image(systemName: "book.closed").foregroundStyle(Palette.green).accessibilityHidden(true)
+        Text("学習項目").font(AppFont.regular(14)).foregroundStyle(Palette.subInk)
+        Text(model.settings.subject ?? "まだ選んでいないよ")
+          .font(model.settings.subject == nil ? AppFont.regular(16) : AppFont.bold(17))
+          .foregroundStyle(model.settings.subject == nil ? Palette.subInk : Palette.ink)
+          .lineLimit(1)
+        Spacer(minLength: 8)
+        Text("変更").font(AppFont.regular(14)).foregroundStyle(Palette.green)
+      }
+      .frame(minHeight: 28)
+      .card(padding: 14)
+    }
+    .buttonStyle(.plain)
+    .accessibilityLabel("学習項目 \(model.settings.subject ?? "まだ選んでいない")。変更する")
   }
 
   private var todayCard: some View {

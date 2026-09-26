@@ -65,6 +65,9 @@ struct StudySettings: Codable, Equatable {
   var scenarioDone: [String] = []
   /// オンボーディングの後に、検証モードを勧めた
   var scenarioInvited = false
+  /// 学習項目(前回選んだもの。次の学習に引き継ぐ)と、自分で足した項目
+  var subject: String?
+  var customSubjects: [String] = []
 
   init() {}
 
@@ -82,6 +85,8 @@ struct StudySettings: Codable, Equatable {
     soundMode = (try? c.decodeIfPresent(SoundMode.self, forKey: .soundMode)) ?? .voice
     scenarioDone = try c.decodeIfPresent([String].self, forKey: .scenarioDone) ?? []
     scenarioInvited = try c.decodeIfPresent(Bool.self, forKey: .scenarioInvited) ?? false
+    subject = try c.decodeIfPresent(String.self, forKey: .subject)
+    customSubjects = try c.decodeIfPresent([String].self, forKey: .customSubjects) ?? []
   }
 
   private static let key = "studySettings"
@@ -146,6 +151,28 @@ final class AppModel {
 
   /// イヤホンがつながっているか(つながっていなければ、周りに人がいるときはイヤホンか消音を勧める)
   private(set) var headphones = false
+
+  /// 学習項目の候補(前回 → よく使う順 → 自分で足したもの → よく使う教科)
+  var subjectChoices: [String] {
+    Subjects.ranked(history: store?.recentSubjects() ?? [], custom: settings.customSubjects)
+  }
+
+  /// 学習項目を選ぶ(候補にない名前は、自分で足した項目として覚える)
+  func chooseSubject(_ name: String) {
+    guard let s = Subjects.normalize(name) else { return }
+    update { settings in
+      settings.subject = s
+      if Subjects.isCustom(s) && !settings.customSubjects.contains(s) {
+        settings.customSubjects = Array(([s] + settings.customSubjects).prefix(20))
+      }
+    }
+    usage("subject_selected", ["kind": Subjects.isCustom(s) ? "custom" : "preset"])
+  }
+
+  /// 自分で足した学習項目を消す
+  func removeCustomSubject(_ name: String) {
+    update { $0.customSubjects.removeAll { $0 == name } }
+  }
 
   /// 検証モードでまだ最後まで行っていない場面(Scenario.phases の番号)
   var scenarioPending: [Int] {

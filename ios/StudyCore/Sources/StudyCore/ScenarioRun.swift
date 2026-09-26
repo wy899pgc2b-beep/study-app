@@ -157,6 +157,8 @@ public struct SessionExport: Encodable, Sendable {
   public var createdAt: Date
   public var reason: String
   public var mode: String
+  /// 学習項目(検証モードでは nil)
+  public var subject: String?
   public var setup: SetupStyle
   public var cfg: AnalysisConfig
   public var calibration: Calibration?
@@ -171,8 +173,9 @@ public struct SessionExport: Encodable, Sendable {
 
   public init(
     appVersion: String, createdAt: Date, reason: String, mode: String, session: StudySession, summary: SessionSummary, durationSec: Double,
-    scenario: [PhaseResult]?, scenarioRemaining: [String]? = nil, perf: Perf
+    scenario: [PhaseResult]?, scenarioRemaining: [String]? = nil, perf: Perf, subject: String? = nil
   ) {
+    self.subject = subject
     self.appVersion = appVersion
     self.createdAt = createdAt
     self.reason = reason
