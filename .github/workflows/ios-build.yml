@@ -1,0 +1,46 @@
+# iPhone アプリのビルド(Mac)。署名はしないので、Apple のアカウントがなくても動く。
+# コンパイルが通るかを確かめる。TestFlight への送信は、Apple Developer Program の登録の後に加える。
+name: ios-build
+
+on:
+  push:
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ios-build.yml'
+  workflow_dispatch:
+
+# 公開リポジトリなので、Actions が使える権限は読み取りだけにする
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - name: Tools
+        run: |
+          xcodebuild -version
+          brew install xcodegen
+          command -v pod || sudo gem install cocoapods
+          pod --version
+      - name: MediaPipe models
+        run: ios/App/scripts/fetch-models.sh
+      - name: Generate the Xcode project
+        working-directory: ios/App
+        run: |
+          xcodegen generate
+          pod install
+      - name: Build for iPhone (no signing)
+        working-directory: ios/App
+        run: |
+          xcodebuild -quiet \
+            -workspace StudyApp.xcworkspace -scheme StudyApp -configuration Debug \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+      - name: Podfile.lock
+        if: always()
+        working-directory: ios/App
+        run: cat Podfile.lock || true

@@ -40,3 +40,39 @@ public func deviceIsLandscape(betaDeg: Double, gammaDeg: Double) -> Bool? {
   if Swift.max(xUp, yUp) < 0.3 { return nil }
   return xUp > yUp
 }
+
+// MARK: - iPhone の傾き(Core Motion の重力の向き)
+
+/// Core Motion の重力(端末の座標:x は右、y は上、z は画面の手前。単位は g)から、
+/// カメラが水平より何度上を向いているかを求める。試作品の cameraTiltFromOrientation と同じ角度になる。
+/// 重力が取れていなければ nil。
+public func cameraTiltFromGravity(x: Double, y: Double, z: Double, backCamera: Bool) -> Double? {
+  let n = (x * x + y * y + z * z).squareRoot()
+  guard n.isFinite, n > 0.1 else { return nil }
+  // 画面の法線(手前向き。フロントカメラの向き)の上向き成分
+  let up = clamp(-z / n, -1, 1)
+  let elevation = deg(asin(up))
+  return backCamera ? -elevation : elevation
+}
+
+/// 画像を解析する前に回す向き(UIImage.Orientation と同じ名前)
+public enum ImageRotation: String, Sendable {
+  case up, down, left, right
+}
+
+/// バックカメラの映像を、端末の向きに合わせて正立させる向き。重力から判断する。
+/// 平らに置いていて分からないときは nil(直前の向きを使い続ける)。
+public func backCameraImageRotation(gravityX x: Double, gravityY y: Double) -> ImageRotation? {
+  if Swift.max(abs(x), abs(y)) < 0.3 { return nil }
+  if abs(x) > abs(y) {
+    // 横向き。上端が左(ホームボタンが右)なら、センサーの向きのまま
+    return x < 0 ? .up : .down
+  }
+  return y < 0 ? .right : .left
+}
+
+/// 端末が横向きか(重力から)。平らに置いていて分からないときは nil。
+public func deviceIsLandscape(gravityX x: Double, gravityY y: Double) -> Bool? {
+  if Swift.max(abs(x), abs(y)) < 0.3 { return nil }
+  return abs(x) > abs(y)
+}

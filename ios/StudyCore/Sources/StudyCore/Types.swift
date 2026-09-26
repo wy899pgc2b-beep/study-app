@@ -45,12 +45,17 @@ public struct SegmentStats: Codable, Equatable, Sendable {
   public var hairFrac: Double?
   public var faceSkinFrac: Double?
   public var personFrac: Double?
+  /// 【記録のみ】髪の中心の高さ(画面の上端 0・下端 1)
+  public var hairCenterY: Double?
 
-  public init(crownRatio: Double? = nil, hairFrac: Double? = nil, faceSkinFrac: Double? = nil, personFrac: Double? = nil) {
+  public init(
+    crownRatio: Double? = nil, hairFrac: Double? = nil, faceSkinFrac: Double? = nil, personFrac: Double? = nil, hairCenterY: Double? = nil
+  ) {
     self.crownRatio = crownRatio
     self.hairFrac = hairFrac
     self.faceSkinFrac = faceSkinFrac
     self.personFrac = personFrac
+    self.hairCenterY = hairCenterY
   }
 }
 

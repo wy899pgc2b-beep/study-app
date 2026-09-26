@@ -17,6 +17,7 @@ import {
   learningStyle,
   scoreMinute,
 } from '../js/analysis.js';
+import { segmentStats } from '../js/vision.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const OUT = join(here, '../../ios/StudyCore/Tests/StudyCoreTests/Fixtures');
@@ -131,6 +132,9 @@ process.on('exit', () => {
     join(OUT, 'misc.json'),
     JSON.stringify({ appVersion: APP_VERSION, calibration: calCases, framing: framingCases, recorder: recorderCases, scoreMinute: scoreCases, learningStyle: styleCases }),
   );
+  // --- 4. 髪・顔の肌・人の面積(vision.js の segmentStats)。分類の番号を並べた画像を乱数で作る
+  writeFileSync(join(OUT, 'vision.json'), JSON.stringify({ appVersion: APP_VERSION, segment: segmentCases() }));
+
   const frameCount = used.reduce((n, s) => n + s.ops.filter((o) => o.f).length, 0);
   console.error(`[export] sessions ${used.length}, frames ${frameCount}, calibration ${calCases.length}, framing ${framingCases.length}, recorder ${recorderCases.length} → ${OUT}`);
 });
@@ -145,6 +149,33 @@ function mulberry32(seed) {
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
+}
+
+// 分類の画像の例:背景の上に、髪・顔の肌・体・服などの長方形を重ねる。番号 6 以上(数えない)も混ぜる
+function segmentCases() {
+  const r = mulberry32(99);
+  const cases = [];
+  for (let i = 0; i < 40; i++) {
+    const [w, h] = [
+      [64, 48],
+      [96, 72],
+      [48, 64],
+      [37, 29],
+    ][i % 4];
+    const mask = new Uint8Array(w * h);
+    const rects = i % 10 === 0 ? 0 : 1 + Math.floor(r() * 6);
+    for (let k = 0; k < rects; k++) {
+      const c = i % 7 === 3 && k === 0 ? 6 + Math.floor(r() * 3) : [0, 1, 1, 2, 3, 3, 4, 5][Math.floor(r() * 8)];
+      const x0 = Math.floor(r() * w);
+      const y0 = Math.floor(r() * h);
+      const x1 = Math.min(w, x0 + 1 + Math.floor(r() * w * 0.7));
+      const y1 = Math.min(h, y0 + 1 + Math.floor(r() * h * 0.7));
+      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) mask[y * w + x] = c;
+    }
+    const step = i % 5 === 4 ? 1 : 4;
+    cases.push({ width: w, height: h, step, mask: Buffer.from(mask).toString('base64'), stats: roundOut(segmentStats(mask, w, h, step)) });
+  }
+  return cases;
 }
 
 // 特徴量の計算の例:顔(478 点と表情係数)、手、上半身、髪の面積を、乱数で少しずつ変えて作る

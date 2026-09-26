@@ -1,0 +1,8 @@
+# 作ったもの・取ってきたものは入れない
+StudyApp.xcodeproj/
+StudyApp.xcworkspace/
+Pods/
+Generated/
+Resources/Models/
+build/
+DerivedData/

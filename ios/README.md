@@ -7,7 +7,7 @@
 | 場所 | 中身 | 状況 |
 | --- | --- | --- |
 | `StudyCore/` | 判定の中心。Apple の仕組みに頼らない Swift のパッケージ(Linux でもテストできる) | 試作品 poc-24 の判定を移した |
-| `App/` | 画面・カメラ・MediaPipe・音声・DB(XcodeGen の project.yml から作る) | これから |
+| `App/` | 画面・カメラ・MediaPipe・音声(XcodeGen の project.yml から作る) | 骨組みを作った(下記) |
 
 ## StudyCore
 
@@ -23,6 +23,8 @@
 | `HandMotion.swift` | `HandMotion` | 手の動きの速さ |
 | `Analyzer.swift` | `Analyzer` | フレームごとの状態と出来事(設計書 4.4〜4.11) |
 | `SessionRecorder.swift` | `SessionRecorder` ほか | 1 分ごとの集中度と学習スタイル(設計書 4.5、4.6) |
+| `Segmentation.swift` | `segmentStats`(vision.js) | 髪・顔の肌・人の面積 |
+| `StudySession.swift` | `app.js` の流れ | 1 回の学習の流れ(開始の儀式 → 学習中 → 一時停止・休憩 → 終了)。儀式の順番は設計書 4.12(目を閉じる → 姿勢) |
 | `Config.swift` | `DEFAULTS` | しきい値。`prototype/tools/gen-swift-config.mjs` で作る(手で書き換えない) |
 
 ### 試作品と同じ判定になっているかの確かめ方
@@ -49,3 +51,28 @@ node tools/export-parity-fixtures.mjs   # 突き合わせ用のデータを作�
 - `swift test`(StudyCore が試作品と同じ判定になる)
 
 手元に Swift があれば、`cd ios/StudyCore && swift test` でも確かめられる。
+
+## App(iPhone アプリの骨組み)
+
+| ファイル | 中身 |
+| --- | --- |
+| `project.yml` | Xcode のプロジェクトの設定(XcodeGen)。Bundle ID は仮(`com.example.studyapp`) |
+| `Podfile` | MediaPipe(`MediaPipeTasksVision`) |
+| `scripts/fetch-models.sh` | MediaPipe のモデルを取ってくる(試作品と同じ 4 つ。リポジトリには入れない) |
+| `Sources/Capture/` | カメラ(バックカメラ・4:3・毎秒 5 回)、傾き(Core Motion)、端末内 AI、フレームから特徴量まで |
+| `Sources/Session/` | 学習の実行(StudySession を動かし、音声で案内する) |
+| `Sources/Views/` | ホーム(休憩タイマーのスイッチ)、学習中(画面は黒。触れると一時停止)、結果 |
+
+まだ入れていないもの:設置位置ガイド、居眠りのアラーム音、結果カードの文の規則、端末の DB、オンボーディング、検証モード。
+
+### ビルド
+
+GitHub Actions の `ios-build`(Mac)が、`ios/` を変えたときに署名なしでビルドする。手元の Mac では次のとおり。
+
+```sh
+cd ios/App
+scripts/fetch-models.sh
+xcodegen generate
+pod install
+open StudyApp.xcworkspace
+```
