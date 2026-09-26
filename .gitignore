@@ -37,3 +37,6 @@ ios/App/Config/Signing.xcconfig
 # Python
 __pycache__/
 *.pyc
+
+# アイコンを作るときに取ってくる文字(scripts/make_icon.py)
+ios/App/.icon-fonts/
