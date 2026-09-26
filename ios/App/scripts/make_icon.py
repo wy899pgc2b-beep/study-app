@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
 """ツクエログのアプリアイコンを作る(決定事項 D-22)。
 
-シンプルで、綺麗で美しく整った見た目にする(アニメ映画のタイトルのような上品さ):
-  - まっすぐ立てた明朝の文字 1 字(「ツクエログ」の「ツ」)を、真ん中に置く
-  - 文字は白から淡い金へのグラデーションと、やわらかい光。斜めに細い光の帯(箔押しのような)
-  - 文字を囲む細い金の輪(内側にもう 1 本の細い線)。輪の真上にキラッ 1 つ
+シンプルで、綺麗で美しく整った見た目にする(アニメ映画のタイトルのような上品さ)。アプリ名は略さずに「ツクエログ」と入れる:
+  - まっすぐ立てた明朝の文字。字と字のあいだは、字の形の幅で測って等しくする。行は真ん中にそろえる
+  - 文字は白から淡い金へのグラデーション(行ごと)と、やわらかい光。斜めに細い光の帯(箔押しのような)
+  - 飾りは細い金の線とキラッ 1 つだけ。左右対称に置く
   - 背景は夕方から夜へ移る空(紺から青、下に灯りのような温かい光)と、左右対称の小さな星
+並べ方(--layout):
+  ring:細い金の輪の中に「ツクエ」「ログ」の 2 行(「机」と「ログ」の組み合わせ)。輪の真上にキラッ
+  line:「ツクエログ」を 1 行で、上下に細い金の線。上の線の真ん中にキラッ
+  mark:輪の中に 1 字だけ(--mark。アプリ名ではない印を使うとき。例:机)
 2 倍の大きさ(2048)で描いて 1024 に縮め、ふちをなめらかにする。透明な部分は作らない(App Store の決まり)。
 
 文字は しっぽり明朝 B1 ExtraBold(SIL Open Font License)。初めて動かすときに google/fonts から取ってくる(リポジトリには入れない)。
 使い方(pillow・numpy・scipy が要る):
-  python3 make_icon.py                                  # Resources/Assets.xcassets/AppIcon.appiconset/icon-1024.png を作り直す
-  python3 make_icon.py --glyph 机 --palette green --out x.png   # ほかの案(文字:ツ・机、色:twilight・green)
-  python3 make_icon.py --preview preview.png            # 角の丸い形で切った、ホーム画面の大きさの見本
+  python3 make_icon.py                                    # Resources/Assets.xcassets/AppIcon.appiconset/icon-1024.png を作り直す
+  python3 make_icon.py --layout line --palette green --out x.png   # ほかの案(色:twilight・green)
+  python3 make_icon.py --preview preview.png              # 角の丸い形で切った、ホーム画面の大きさの見本
 """
 
 import argparse
@@ -30,16 +34,16 @@ ICON = os.path.join(APP, "Resources/Assets.xcassets/AppIcon.appiconset/icon-1024
 FONT_DIR = os.path.join(APP, ".icon-fonts")
 FONT = "ShipporiMinchoB1-ExtraBold.ttf"
 FONT_URL = "https://raw.githubusercontent.com/google/fonts/main/ofl/shipporiminchob1/ShipporiMinchoB1-ExtraBold.ttf"
+NAME = "ツクエログ"
 
 S = 2048  # 描く大きさ(書き出しは 1024)
 Y, X = np.mgrid[0:S, 0:S].astype(np.float32)
 CX, CY = S / 2, S / 2
+RING_R = S * 0.385
 
-# 金(輪と、緑の案の文字)と、淡い金(夕空の案の文字)
+# 金(飾りと、緑の案の文字)と、淡い金(夕空の案の文字)
 GOLD = [(0.0, 0xFFF3CF), (0.42, 0xF3D183), (0.58, 0xE2AE55), (1.0, 0xC4892E)]
 PALE = [(0.0, 0xFFFFFF), (0.6, 0xFFF4DA), (1.0, 0xF5D9A2)]
-# 文字ごとの大きさと、見た目の中心に合わせる上下のずれ
-GLYPHS = {"ツ": (1060, 0.01), "机": (920, 0.015)}
 
 
 def font_path():
@@ -71,20 +75,53 @@ def stops(t, pairs):
     return out
 
 
-def glyph(text, size, dy):
-    """文字の形(0〜1)。字面の中心を、真ん中から dy だけ下に置く"""
-    f = ImageFont.truetype(font_path(), size)
-    layer = Image.new("L", (S, S), 0)
-    d = ImageDraw.Draw(layer)
-    l, t, r, b = d.textbbox((0, 0), text, font=f)
-    d.text((CX - (l + r) / 2, CY + S * dy - (t + b) / 2), text, font=f, fill=255)
-    return np.asarray(layer, dtype=np.float32) / 255
+def text_lines(lines, size, gap_x, gap_y, cy=CY):
+    """行ごとの文字の形(0〜1)。字と字のあいだは字の形の幅で測って gap_x にそろえ、行は真ん中にそろえる。
+    行の上下は、その行の字の形のいちばん上と下で測る(同じ行の字は同じ高さの線にのせる)"""
+    f = ImageFont.truetype(font_path(), round(size))
+    measured = []
+    for line in lines:
+        boxes = [f.getbbox(ch) for ch in line]
+        width = sum(b[2] - b[0] for b in boxes) + gap_x * (len(line) - 1)
+        top, bottom = min(b[1] for b in boxes), max(b[3] for b in boxes)
+        measured.append((line, boxes, width, top, bottom))
+    height = sum(b - t for *_, t, b in measured) + gap_y * (len(lines) - 1)
+    y = cy - height / 2
+    masks = []
+    for line, boxes, width, top, bottom in measured:
+        layer = Image.new("L", (S, S), 0)
+        d = ImageDraw.Draw(layer)
+        x = CX - width / 2
+        for ch, box in zip(line, boxes):
+            d.text((x - box[0], y - top), ch, font=f, fill=255)
+            x += box[2] - box[0] + gap_x
+        masks.append(np.asarray(layer, dtype=np.float32) / 255)
+        y += bottom - top + gap_y
+    return masks
+
+
+def fit_in_circle(lines, radius, size=S * 0.2, gap_x=0.05, gap_y=0.16):
+    """輪の中に収まるいちばん大きい大きさで並べる(gap は字の大きさに対する割合)"""
+    for _ in range(4):
+        masks = text_lines(lines, size, size * gap_x, size * gap_y)
+        ink = np.maximum.reduce(masks) > 0.5
+        reach = np.hypot(X[ink] - CX, Y[ink] - CY).max()
+        size *= radius / reach
+    return text_lines(lines, size, size * gap_x, size * gap_y)
 
 
 def ring(radius, width, gap_center, gap_r):
     """細い輪。キラッの後ろは切っておく"""
     a = np.clip(width / 2 + 0.5 - np.abs(np.hypot(X - CX, Y - CY) - radius), 0, 1)
     return a * np.clip((np.hypot(X - gap_center[0], Y - gap_center[1]) - gap_r) / 6, 0, 1)
+
+
+def rule(y, half, width, gap_r=0.0):
+    """横の細い線。両はしは細くして消え、真ん中は gap_r だけ切る(キラッの場所)"""
+    dx = np.abs(X - CX)
+    taper = np.clip((half - dx) / (half * 0.35), 0, 1)
+    a = np.clip(width / 2 * taper + 0.5 - np.abs(Y - y), 0, 1) * (dx <= half)
+    return a * np.clip((dx - gap_r) / 6, 0, 1) if gap_r else a
 
 
 def sparkle(img, cx, cy, r, inner):
@@ -127,25 +164,39 @@ def background(palette):
     return over(img, np.zeros(3, dtype=np.float32), vig * 0.25)
 
 
-def render(text="ツ", palette="twilight"):
-    size, dy = GLYPHS[text]
+def render(layout="ring", palette="twilight", mark="机"):
     img = background(palette)
-    a = glyph(text, size, dy)
-    rows = np.nonzero(a.max(axis=1) > 0.5)[0]
-    radius = S * 0.385
-    spark = (CX, CY - radius)
-    outer = ring(radius, S * 0.012, spark, S * 0.05)
-    inner = ring(radius - S * 0.028, S * 0.0045, spark, S * 0.07)
-    # 文字と輪の、やわらかい影と、文字のまわりの光
-    shadow = ndimage.gaussian_filter(np.maximum(a, outer), 14)
+    fill = PALE if palette == "twilight" else GOLD
+    if layout in ("ring", "mark"):
+        spark = (CX, CY - RING_R)
+        lines = ["ツクエ", "ログ"] if layout == "ring" else [mark]
+        texts = fit_in_circle(lines, RING_R * (0.74 if layout == "ring" else 0.66))
+        deco = [ring(RING_R, S * 0.012, spark, S * 0.05), ring(RING_R - S * 0.028, S * 0.0045, spark, S * 0.07) * 0.8]
+        spark_r = S * 0.07
+    elif layout == "line":
+        texts = text_lines([NAME], S * 0.148, S * 0.148 * 0.03, 0)
+        ink = texts[0] > 0.5
+        rows = np.nonzero(ink.any(axis=1))[0]
+        above, below = rows.min() - S * 0.1, rows.max() + S * 0.1
+        spark = (CX, above)
+        deco = [rule(above, S * 0.3, S * 0.009, gap_r=S * 0.055), rule(below, S * 0.3, S * 0.009)]
+        spark_r = S * 0.06
+    else:
+        raise SystemExit(f"並べ方がありません: {layout}")
+    letters = np.maximum.reduce(texts)
+    deco_all = np.maximum.reduce(deco)
+    # 文字と飾りの、やわらかい影と、文字のまわりの光
+    shadow = ndimage.gaussian_filter(np.maximum(letters, deco_all), 14)
     img = over(img, np.zeros(3, dtype=np.float32), ndimage.shift(shadow, (18, 0), order=1) * 0.35)
-    img = over(img, rgb(0xFFE7B0), np.clip(ndimage.gaussian_filter(a, 40) * 1.2, 0, 1) * 0.28)
-    img = foil(img, outer, GOLD, CY - radius, CY + radius, sheen=0.2)
-    img = foil(img, inner * 0.8, GOLD, CY - radius, CY + radius, sheen=0.0)
-    img = foil(img, a, PALE if palette == "twilight" else GOLD, rows.min(), rows.max(), sheen=0.28)
-    img = sparkle(img, spark[0], spark[1], S * 0.07, 0.13)
+    img = over(img, rgb(0xFFE7B0), np.clip(ndimage.gaussian_filter(letters, 36) * 1.2, 0, 1) * 0.26)
+    for i, d in enumerate(deco):
+        img = foil(img, d, GOLD, CY - RING_R, CY + RING_R, sheen=0.2 if i == 0 else 0.0)
+    for t in texts:
+        rows = np.nonzero(t.max(axis=1) > 0.5)[0]
+        img = foil(img, t, fill, rows.min(), rows.max(), sheen=0.28)
+    img = sparkle(img, spark[0], spark[1], spark_r, 0.13)
     if palette == "twilight":
-        # 左右対称の小さな星(輪にかからない所)
+        # 左右対称の小さな星(飾りにかからない所)
         for x, y, r in ((0.17, 0.15, 0.017), (0.83, 0.15, 0.017), (0.09, 0.3, 0.009), (0.91, 0.3, 0.009)):
             img = sparkle(img, S * x, S * y, S * r, 0.18)
     out = Image.fromarray(np.clip(img * 255 + 0.5, 0, 255).astype(np.uint8), "RGB")
@@ -180,12 +231,13 @@ def preview(icon, path):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--glyph", default="ツ", choices=sorted(GLYPHS))
+    p.add_argument("--layout", default="ring", choices=["ring", "line", "mark"])
     p.add_argument("--palette", default="twilight", choices=["twilight", "green"])
+    p.add_argument("--mark", default="机")
     p.add_argument("--out", default=ICON)
     p.add_argument("--preview")
     a = p.parse_args()
-    icon = render(a.glyph, a.palette)
+    icon = render(a.layout, a.palette, a.mark)
     icon.save(a.out, optimize=True)
     if a.preview:
         preview(icon, a.preview)
