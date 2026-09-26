@@ -47,7 +47,8 @@ final class RestrictionCoreTests: XCTestCase {
     let t = at(28, 10, 10)
     XCTAssertEqual(s.requestEnd(now: t), .confirmAgain(afterSec: 6))
     XCTAssertEqual(s.requestEnd(now: t.addingTimeInterval(6)), .allowed)
-    XCTAssertEqual(session(.normal).requestEnd(now: at(28, 11, 0)), .allowed, "時間になったら、すぐ終われる")
+    var over = session(.normal)
+    XCTAssertEqual(over.requestEnd(now: at(28, 11, 0)), .allowed, "時間になったら、すぐ終われる")
   }
 
   func testStudyBreakSkipsTheConfirmation() {
