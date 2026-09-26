@@ -51,15 +51,8 @@ struct HomeView: View {
             .font(AppFont.regular(13, relativeTo: .footnote))
             .foregroundStyle(Palette.subInk)
             .frame(maxWidth: .infinity)
-          // スマホ制限(裏機能。決定事項 D-24):ホームのいちばん下に小さく出す
-          Button {
-            showRestriction = true
-          } label: {
-            Label(model.restriction.homeStatus.map { "スマホ制限・\($0)" } ?? "スマホ制限", systemImage: "hourglass")
-              .font(AppFont.regular(13, relativeTo: .footnote))
-              .foregroundStyle(model.restriction.homeStatus == nil ? Palette.dimText : Palette.green)
-              .frame(maxWidth: .infinity, minHeight: 44)
-          }
+          // スマホ制限(裏機能。決定事項 D-24):ホームのいちばん下に小さく出す。プリセットはワンタップで始まる(D-25)
+          RestrictionHomeRow { showRestriction = true }
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 24)

@@ -103,6 +103,31 @@ enum RestrictionEngine {
       now: now, watchEnd: true)
   }
 
+  enum StartOutcome: Equatable {
+    case started(until: Date)
+    /// もう集中セッション中
+    case alreadyRunning(until: Date?)
+    /// Apple の許可(Family Controls)を得ていないビルド
+    case unavailable
+    /// スクリーンタイムの利用を許可していない
+    case notAuthorized
+    /// 制限するアプリを選んでいない
+    case noApps
+  }
+
+  /// プリセットをワンタップして始める(ホーム・スマホ制限の画面・ショートカット・Siri から。D-25)。id が nil ならホームのプリセット
+  static func startPreset(_ id: String?, now: Date) -> StartOutcome {
+    guard RestrictionEnv.enabled else { return .unavailable }
+    guard AuthorizationCenter.shared.authorizationStatus == .approved else { return .notAuthorized }
+    sweep(now: now)
+    let config = SharedStore.config()
+    guard !config.focusApps.isEmpty else { return .noApps }
+    if let s = SharedStore.state().sessions[RestrictionKeys.session], !s.isOver(at: now) { return .alreadyRunning(until: s.endAt) }
+    guard let preset = id.flatMap(config.preset) ?? config.homePreset ?? config.presets.first else { return .noApps }
+    startFocus(minutes: preset.minutes, difficulty: preset.difficulty, apps: config.focusApps, now: now)
+    return .started(until: now.addingTimeInterval(Double(preset.minutes) * 60))
+  }
+
   /// 学習を始めた(学習と連動)。学習を終えるまで制限する
   static func startStudy(difficulty: Difficulty, apps: BlockList, now: Date) {
     start(kind: .study, key: RestrictionKeys.study, end: nil, difficulty: difficulty, apps: apps, now: now, watchEnd: false)
@@ -293,8 +318,15 @@ enum RestrictionEngine {
     for (id, until) in state.unlockedUntil where until <= now { relock(id, now: now) }
   }
 
+  /// 見張りから呼ばれたついでに、見張りと制限を設定に合わせ直す。
+  /// アプリを開かなくても、止まった見張りや外れた制限が 0 時と区間の区切りごとに直り、毎日そのまま動く(D-25)
+  static func heal(now: Date) {
+    sync(now: now, slack: slack)
+  }
+
   /// 設定を変えたときと、アプリを開いたときに、見張りと制限を設定に合わせる
-  static func sync(now: Date) {
+  /// (slack:見張りから呼ばれたときは、呼ばれる時刻のずれを見込んで時間割の区間を調べる)
+  static func sync(now: Date, slack: TimeInterval = 0) {
     sweep(now: now)
     let config = SharedStore.config()
     let state = SharedStore.state()
@@ -307,7 +339,8 @@ enum RestrictionEngine {
       }
     }
     let limits = config.limits.filter { $0.limit.enabled && !$0.apps.isEmpty }
-    if !limits.isEmpty || config.opens.contains(where: { $0.limit.enabled }) {
+    // 1 日の区間は、毎日動く制限があるあいだ見張る(0 時に、時間制限・開く回数を数え直し、ずれを直す)
+    if config.hasDailyRules {
       wanted[RestrictionKeys.day] = "day;" + limits.map { "\($0.id)#\($0.revision)" }.joined(separator: ",")
     }
     let running = Watcher.monitoring
@@ -326,7 +359,7 @@ enum RestrictionEngine {
     SharedStore.updateState { $0.monitored = wanted }
 
     // 時間割:いまの区間に合わせる(消した時間割は終える)
-    for rule in config.schedules { checkSchedule(rule.id, now: now) }
+    for rule in config.schedules { checkSchedule(rule.id, now: now, slack: slack) }
     for key in state.sessions.keys {
       if let id = RestrictionKeys.id(key, prefix: "schedule."), config.schedule(id) == nil { end(key) }
     }

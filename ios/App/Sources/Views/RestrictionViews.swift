@@ -54,6 +54,40 @@ private struct RestrictionFeatureList: View {
 
 private let privacyNote = "選んだアプリや使った時間は、Apple のスクリーンタイムの仕組みの中だけで扱われます。ツクエログにも、学校や家族などほかの人にもわかりません"
 
+/// ホームのいちばん下の小さな入口。プリセット(はじめは 1時間半)をワンタップで始められる(D-25)
+struct RestrictionHomeRow: View {
+  @Environment(AppModel.self) private var model
+  var open: () -> Void
+
+  var body: some View {
+    let r = model.restriction
+    HStack(spacing: 10) {
+      Button(action: open) {
+        Label(r.homeStatus.map { "スマホ制限・\($0)" } ?? "スマホ制限", systemImage: "hourglass")
+          .font(AppFont.regular(13, relativeTo: .footnote))
+          .foregroundStyle(r.homeStatus == nil ? Palette.dimText : Palette.green)
+          .frame(minHeight: 44)
+      }
+      if r.focus == nil, let preset = r.homePreset {
+        Button {
+          r.start(preset)
+        } label: {
+          Label(preset.label, systemImage: "play.fill")
+            .font(AppFont.bold(13, relativeTo: .footnote))
+            .padding(.horizontal, 12)
+            .frame(minHeight: 32)
+            .background(Palette.greenSoft, in: Capsule())
+            .foregroundStyle(Palette.green)
+        }
+        .frame(minHeight: 44)
+        .accessibilityLabel("\(preset.label)の集中セッションを始める")
+      }
+    }
+    .frame(maxWidth: .infinity)
+    .sensoryFeedback(trigger: r.focus != nil) { _, started in started ? .success : nil }
+  }
+}
+
 /// Apple の許可(Family Controls)が下りるまで
 struct RestrictionUnavailableView: View {
   var body: some View {
@@ -115,6 +149,8 @@ struct RestrictionForm: View {
         }
       } header: {
         Text("集中セッション")
+      } footer: {
+        Text("プリセットをワンタップで始まります。ホームのいちばん下の「▶ \(r.config.homePreset?.label ?? "プリセット")」や、ショートカット・Siri(「ツクエログで集中を始める」)からも始められます")
       }
 
       Section {
@@ -159,9 +195,17 @@ struct RestrictionForm: View {
           }
         }
         if r.canAddSchedule {
-          Button {
-            newSchedule = ScheduleRule(
-              schedule: WeeklySchedule(name: "", weekdays: [2, 3, 4, 5, 6], startMinute: 21 * 60, endMinute: 23 * 60), apps: r.config.focusApps)
+          // ひな形を選ぶだけで作れる(曜日と時刻は、あとから変えられる)
+          Menu {
+            ForEach(ScheduleTemplate.all, id: \.name) { t in
+              Button("\(t.name)(\(t.summary))") {
+                newSchedule = ScheduleRule(schedule: t.make(), apps: r.config.focusApps)
+              }
+            }
+            Button("自分で決める") {
+              newSchedule = ScheduleRule(
+                schedule: WeeklySchedule(name: "", weekdays: [2, 3, 4, 5, 6], startMinute: 21 * 60, endMinute: 23 * 60), apps: r.config.focusApps)
+            }
           } label: {
             Label("時間割を足す", systemImage: "plus")
           }
@@ -169,7 +213,7 @@ struct RestrictionForm: View {
       } header: {
         Text("時間割")
       } footer: {
-        Text("決めた曜日と時刻に、毎週くり返して制限します(\(RestrictionConfig.maxSchedules) つまで)")
+        Text("一度決めれば、アプリを開かなくても、決めた曜日と時刻に毎週そのまま制限します(\(RestrictionConfig.maxSchedules) つまで)")
       }
 
       Section {
@@ -178,7 +222,7 @@ struct RestrictionForm: View {
             LimitEditor(rule: rule, isNew: false)
           } label: {
             RuleRow(
-              title: rule.limit.name, detail: "1 日 \(minutesLabel(rule.limit.minutes))・\(rule.limit.difficulty.label)", enabled: rule.limit.enabled,
+              title: rule.limit.name, detail: "1 日 \(durationLabel(rule.limit.minutes))・\(rule.limit.difficulty.label)", enabled: rule.limit.enabled,
               active: r.state.sessions[rule.key] != nil)
           }
         }
@@ -236,9 +280,6 @@ struct RestrictionForm: View {
   }
 }
 
-private func minutesLabel(_ m: Int) -> String {
-  m >= 60 && m % 60 == 0 ? "\(m / 60) 時間" : m > 60 ? "\(m / 60) 時間 \(m % 60) 分" : "\(m) 分"
-}
 
 private struct RuleRow: View {
   var title: String
@@ -261,7 +302,7 @@ private struct RuleRow: View {
   }
 }
 
-/// 集中セッション:始める(長さと厳しさ)/いまの様子と、休憩・終了
+/// 集中セッション:プリセットをワンタップして始める/いまの様子と、休憩・終了
 struct FocusSessionCard: View {
   @Environment(AppModel.self) private var model
   @State private var notice: String?
@@ -288,20 +329,26 @@ struct FocusSessionCard: View {
   private var starter: some View {
     let r = model.restriction
     VStack(alignment: .leading, spacing: 12) {
-      Picker("長さ", selection: Binding(get: { r.config.sessionMinutes }, set: { v in r.updateConfig { $0.sessionMinutes = v } })) {
-        ForEach(RestrictionConfig.sessionChoices, id: \.self) { Text(minutesLabel($0)).tag($0) }
+      LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+        ForEach(r.config.presets) { preset in
+          Button {
+            r.start(preset)
+          } label: {
+            VStack(spacing: 2) {
+              Label(preset.label, systemImage: "play.fill").font(AppFont.bold(17))
+              Text(preset.difficulty.label).font(AppFont.regular(12)).opacity(0.85)
+            }
+            .frame(maxWidth: .infinity, minHeight: 56)
+          }
+          .buttonStyle(.borderedProminent)
+          .disabled(r.config.focusApps.isEmpty)
+        }
       }
-      DifficultyPicker(selection: Binding(get: { r.config.difficulty }, set: { v in r.updateConfig { $0.difficulty = v } }), forStudy: false)
-      Button {
-        r.startFocus()
-      } label: {
-        Label("集中を始める", systemImage: "play.fill").frame(maxWidth: .infinity)
-      }
-      .buttonStyle(.borderedProminent)
-      .disabled(r.config.focusApps.isEmpty)
       if r.config.focusApps.isEmpty {
         Text("先に、下の「制限するアプリ」を選んでね").font(AppFont.regular(13)).foregroundStyle(Palette.subInk)
       }
+      NavigationLink("プリセットを変える") { PresetListView() }
+        .font(AppFont.regular(14))
     }
     .padding(.vertical, 4)
   }
@@ -543,7 +590,7 @@ struct LimitEditor: View {
       }
       Section("1 日に使える時間") {
         Picker("時間", selection: $rule.limit.minutes) {
-          ForEach(DailyLimit.choices, id: \.self) { Text(minutesLabel($0)).tag($0) }
+          ForEach(DailyLimit.choices, id: \.self) { Text(durationLabel($0)).tag($0) }
         }
       }
       Section {
@@ -664,4 +711,87 @@ private func minuteBinding(_ minutes: Binding<Int>) -> Binding<Date> {
       minutes.wrappedValue = (c.hour ?? 0) * 60 + (c.minute ?? 0)
     }
   )
+}
+
+/// 集中セッションのプリセット(4 つまで)と、ホームのワンタップに出すもの
+struct PresetListView: View {
+  @Environment(AppModel.self) private var model
+  @State private var editing: FocusPreset?
+
+  var body: some View {
+    let r = model.restriction
+    Form {
+      Section {
+        ForEach(r.config.presets) { preset in
+          Button {
+            editing = preset
+          } label: {
+            HStack {
+              VStack(alignment: .leading, spacing: 2) {
+                Text(preset.label).font(AppFont.bold(16)).foregroundStyle(Palette.ink)
+                Text(preset.difficulty.label).font(AppFont.regular(13)).foregroundStyle(Palette.subInk)
+              }
+              Spacer()
+              if r.config.homePresetID == preset.id {
+                Label("ホーム", systemImage: "house.fill").font(AppFont.regular(12)).foregroundStyle(Palette.green)
+              }
+            }
+          }
+          .swipeActions {
+            Button("消す", role: .destructive) { r.deletePreset(preset.id) }
+          }
+        }
+        if r.canAddPreset {
+          Button {
+            editing = FocusPreset(minutes: 45)
+          } label: {
+            Label("プリセットを足す", systemImage: "plus")
+          }
+        }
+      } footer: {
+        Text("ワンタップで、選んだアプリをこの長さだけ制限します(\(FocusPreset.maxCount) つまで)")
+      }
+      Section {
+        Picker("ホームに出す", selection: Binding(get: { r.config.homePresetID }, set: { r.setHomePreset($0) })) {
+          Text("出さない").tag("")
+          ForEach(r.config.presets) { Text($0.label).tag($0.id) }
+        }
+      } footer: {
+        Text("ホームのいちばん下に、ワンタップで始めるボタンを出します")
+      }
+    }
+    .navigationTitle("プリセット")
+    .sheet(item: $editing) { preset in NavigationStack { PresetEditor(preset: preset) } }
+  }
+}
+
+private struct PresetEditor: View {
+  @Environment(AppModel.self) private var model
+  @Environment(\.dismiss) private var dismiss
+  @State var preset: FocusPreset
+
+  var body: some View {
+    let r = model.restriction
+    Form {
+      Section("長さ") {
+        Picker("長さ", selection: $preset.minutes) {
+          ForEach(FocusPreset.choices, id: \.self) { Text(durationLabel($0)).tag($0) }
+        }
+        .pickerStyle(.wheel)
+      }
+      Section("厳しさ") {
+        DifficultyPicker(selection: $preset.difficulty, forStudy: false)
+      }
+    }
+    .navigationTitle(preset.label)
+    .toolbar {
+      ToolbarItem(placement: .cancellationAction) { Button("やめる") { dismiss() } }
+      ToolbarItem(placement: .confirmationAction) {
+        Button("保存") {
+          r.save(preset)
+          dismiss()
+        }
+      }
+    }
+  }
 }

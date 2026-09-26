@@ -82,8 +82,10 @@ struct OpenRule: Codable, Equatable, Identifiable {
 struct RestrictionConfig: Codable, Equatable {
   /// 集中セッションと、学習中に制限するアプリ
   var focusApps = BlockList()
-  var sessionMinutes = 60
-  var difficulty: Difficulty = .normal
+  /// 集中セッションのプリセット(ワンタップで始める。D-25)と、ホームに出すもの
+  var presets = FocusPreset.defaults
+  /// 空のときは、ホームに出さない
+  var homePresetID = FocusPreset.defaultHomeID
   /// 机に向かっている間(学習を始めてから終えるまで)も制限する
   var studyLink = false
   var studyDifficulty: Difficulty = .normal
@@ -95,7 +97,6 @@ struct RestrictionConfig: Codable, Equatable {
   static let maxSchedules = 4
   static let maxLimits = 3
   static let maxOpens = 3
-  static let sessionChoices = [15, 25, 30, 45, 60, 90, 120, 180]
 
   init() {}
 
@@ -103,8 +104,8 @@ struct RestrictionConfig: Codable, Equatable {
   init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     focusApps = (try? c.decodeIfPresent(BlockList.self, forKey: .focusApps)) ?? BlockList()
-    sessionMinutes = try c.decodeIfPresent(Int.self, forKey: .sessionMinutes) ?? 60
-    difficulty = (try? c.decodeIfPresent(Difficulty.self, forKey: .difficulty)) ?? .normal
+    presets = (try? c.decodeIfPresent([FocusPreset].self, forKey: .presets)) ?? FocusPreset.defaults
+    homePresetID = try c.decodeIfPresent(String.self, forKey: .homePresetID) ?? FocusPreset.defaultHomeID
     studyLink = try c.decodeIfPresent(Bool.self, forKey: .studyLink) ?? false
     studyDifficulty = (try? c.decodeIfPresent(Difficulty.self, forKey: .studyDifficulty)) ?? .normal
     schedules = (try? c.decodeIfPresent([ScheduleRule].self, forKey: .schedules)) ?? []
@@ -113,6 +114,14 @@ struct RestrictionConfig: Codable, Equatable {
   }
 
   func schedule(_ id: String) -> ScheduleRule? { schedules.first { $0.id == id } }
+  func preset(_ id: String) -> FocusPreset? { presets.first { $0.id == id } }
+  /// ホームのワンタップで始めるプリセット
+  var homePreset: FocusPreset? { preset(homePresetID) }
+
+  /// 何か 1 つでも、毎日動く制限(時間割・時間制限・開く回数)を決めている
+  var hasDailyRules: Bool {
+    schedules.contains { $0.schedule.enabled } || limits.contains { $0.limit.enabled } || opens.contains { $0.limit.enabled }
+  }
   func limit(_ id: String) -> LimitRule? { limits.first { $0.id == id } }
   func open(_ id: String) -> OpenRule? { opens.first { $0.id == id } }
 

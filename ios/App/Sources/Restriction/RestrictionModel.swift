@@ -84,7 +84,9 @@ final class RestrictionModel {
   /// ホームの入口に出す短い様子
   var homeStatus: String? {
     guard ready else { return nil }
-    if focus != nil { return "集中セッション中" }
+    if let s = focus, !s.isOver(at: Date()) {
+      return s.onBreak(at: Date()) ? "休憩中" : "集中セッション中" + (s.endAt.map { "(\(clock($0)) まで)" } ?? "")
+    }
     if study != nil { return "学習中は制限中" }
     if !otherActive.isEmpty { return "制限中" }
     return nil
@@ -100,10 +102,38 @@ final class RestrictionModel {
 
   // MARK: 集中セッション
 
-  func startFocus() {
-    guard ready, !config.focusApps.isEmpty, focus == nil else { return }
-    RestrictionEngine.startFocus(minutes: config.sessionMinutes, difficulty: config.difficulty, apps: config.focusApps, now: Date())
+  /// ホームのワンタップで始めるプリセット(すぐ始められるときだけ)
+  var homePreset: FocusPreset? {
+    guard ready, !config.focusApps.isEmpty else { return nil }
+    return config.homePreset
+  }
+
+  /// プリセットで集中セッションを始める(ワンタップ。D-25)
+  @discardableResult
+  func start(_ preset: FocusPreset) -> RestrictionEngine.StartOutcome {
+    let outcome = RestrictionEngine.startPreset(preset.id, now: Date())
     reload()
+    return outcome
+  }
+
+  var canAddPreset: Bool { config.presets.count < FocusPreset.maxCount }
+
+  func save(_ preset: FocusPreset) {
+    updateConfig { c in
+      if let i = c.presets.firstIndex(where: { $0.id == preset.id }) { c.presets[i] = preset } else { c.presets.append(preset) }
+    }
+  }
+
+  func deletePreset(_ id: String) {
+    updateConfig { c in
+      c.presets.removeAll { $0.id == id }
+      if c.homePresetID == id { c.homePresetID = c.presets.first?.id ?? "" }
+    }
+  }
+
+  /// ホームのワンタップに出すプリセット(空なら出さない)
+  func setHomePreset(_ id: String) {
+    updateConfig { $0.homePresetID = id }
   }
 
   @discardableResult

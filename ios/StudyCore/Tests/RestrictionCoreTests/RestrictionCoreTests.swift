@@ -168,6 +168,29 @@ final class RestrictionCoreTests: XCTestCase {
     XCTAssertEqual(DayKey.endOfDay(at(28, 9, 0), calendar: cal), at(29, 0, 0))
   }
 
+  // MARK: プリセットと時間割のひな形(D-25)
+
+  func testPresetsAndDurationLabels() {
+    XCTAssertEqual(durationLabel(25), "25分")
+    XCTAssertEqual(durationLabel(60), "1時間")
+    XCTAssertEqual(durationLabel(90), "1時間半")
+    XCTAssertEqual(durationLabel(100), "1時間40分")
+    XCTAssertEqual(durationLabel(150), "2時間半")
+    let home = FocusPreset.defaults.first { $0.id == FocusPreset.defaultHomeID }
+    XCTAssertEqual(home?.label, "1時間半", "ホームのワンタップは 1時間半")
+    XCTAssertEqual(home?.difficulty, .normal)
+    XCTAssertLessThanOrEqual(FocusPreset.defaults.count, FocusPreset.maxCount)
+    XCTAssertTrue(FocusPreset.defaults.allSatisfy { FocusPreset.choices.contains($0.minutes) })
+  }
+
+  func testScheduleTemplatesAreValid() {
+    for t in ScheduleTemplate.all {
+      XCTAssertNil(t.make().problem, t.name)
+    }
+    XCTAssertEqual(ScheduleTemplate.all.last?.summary, "毎日 22:30〜6:30")
+    XCTAssertTrue(ScheduleTemplate.all.last!.make().isActive(at: at(29, 2, 0), calendar: cal), "寝る前は、夜中も続く")
+  }
+
   // MARK: シールドの文言
 
   func testShieldCopyFollowsTheDifficulty() {
