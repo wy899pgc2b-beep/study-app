@@ -6,25 +6,25 @@ import os
 // 端末の DB(SQLite。GRDB を使う)。学習の記録を 1 分ごとに保存し、アプリが強制終了されても残るようにする(MVP の完了の条件 7)。
 // 映像・画像・特徴点は保存しない。
 
-extension SessionRecord: FetchableRecord, PersistableRecord {
+extension SessionRecord: @retroactive FetchableRecord, @retroactive PersistableRecord {
   public static var databaseTableName: String { "session" }
 }
 
-extension MinuteRow: FetchableRecord, PersistableRecord {
+extension MinuteRow: @retroactive FetchableRecord, @retroactive PersistableRecord {
   public static var databaseTableName: String { "minute" }
   // 同じ分を保存し直したら置き換える
   public static let persistenceConflictPolicy = PersistenceConflictPolicy(insert: .replace, update: .replace)
 }
 
-extension EventRow: FetchableRecord, PersistableRecord {
+extension EventRow: @retroactive FetchableRecord, @retroactive PersistableRecord {
   public static var databaseTableName: String { "event" }
 }
 
-extension IntervalRow: FetchableRecord, PersistableRecord {
+extension IntervalRow: @retroactive FetchableRecord, @retroactive PersistableRecord {
   public static var databaseTableName: String { "interval" }
 }
 
-extension UsageEvent: FetchableRecord, PersistableRecord {
+extension UsageEvent: @retroactive FetchableRecord, @retroactive PersistableRecord {
   public static var databaseTableName: String { "usageEvent" }
 }
 
