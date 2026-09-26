@@ -11,6 +11,8 @@ post_install do |installer|
   installer.pods_project.targets.each do |target|
     target.build_configurations.each do |config|
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '17.0'
+      # ライブラリはここでは署名しない(アプリに入れるときに、アプリと同じ証明書で署名される)
+      config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
     end
   end
 end

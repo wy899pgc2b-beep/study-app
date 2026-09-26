@@ -29,6 +29,12 @@ struct HomeView: View {
             Label("机に向かう", systemImage: "lamp.desk.fill")
           }
           .buttonStyle(PrimaryButtonStyle())
+          if let level = SessionRunner.batteryLevel(), level <= 0.3, !SessionRunner.isCharging {
+            Label("電池が残り \(Int((level * 100).rounded()))%。充電しながら使うと安心だよ", systemImage: "battery.25")
+              .font(AppFont.regular(14))
+              .foregroundStyle(Palette.lampText)
+              .frame(maxWidth: .infinity)
+          }
           weekBars
           Label("映像はこの iPhone の中だけで解析します", systemImage: "lock")
             .font(AppFont.regular(13, relativeTo: .footnote))

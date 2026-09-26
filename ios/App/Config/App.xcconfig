@@ -1,0 +1,8 @@
+// アプリの版と Bundle ID(アプリの target だけに効く)。
+// TestFlight に送る流れ(.github/workflows/testflight.yml)が、送る前に Signing.xcconfig(署名の設定。リポジトリには入れない)を作る。
+MARKETING_VERSION = 0.1.0
+CURRENT_PROJECT_VERSION = 1
+// 仮の Bundle ID。利用者が決めたら、GitHub の変数 BUNDLE_ID で差し替える
+PRODUCT_BUNDLE_IDENTIFIER = com.example.studyapp
+
+#include? "Signing.xcconfig"

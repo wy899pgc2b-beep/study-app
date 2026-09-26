@@ -29,6 +29,7 @@
 | `ResultCard.swift` | − | 結果カードの文(褒め言葉と明日の一手の規則。言い回しを複数用意し、前回と同じ文を続けない) |
 | `SelfRatingComment.swift` | − | 体感の 1 タップと判定を並べる一言 |
 | `Records.swift` | − | 端末に保存する記録の形(学習・1 分ごと・出来事・一時停止と休憩の区間・利用状況)、学習日(04:00 区切り)と合計、強制終了からの回復、「記録を書き出す」の JSON |
+| `Power.swift` | − | 熱と電池の決め方(解析の回数、電池の知らせと終了、1 時間あたりの電池の減り) |
 | `Scenario.swift` | `scenario.js` | 検証シナリオの 9 場面と採点(`evaluatePhase`) |
 | `ScenarioRun.swift` | `app.js` の scenarioStep、finish | 検証モードの進み方と、1 回の学習の書き出し(試作品の結果の JSON と同じ形。映像・画像・特徴点は含めない) |
 | `Config.swift` | `DEFAULTS` | しきい値。`prototype/tools/gen-swift-config.mjs` で作る(手で書き換えない) |
@@ -67,7 +68,7 @@ node tools/export-parity-fixtures.mjs   # 突き合わせ用のデータを作�
 | `scripts/fetch-models.sh` | MediaPipe のモデルを取ってくる(試作品と同じ 4 つ。リポジトリには入れない) |
 | `scripts/fetch-fonts.sh` | 画面の文字 Zen Maru Gothic(SIL Open Font License)を、ライセンスの文書と一緒に取ってくる |
 | `Sources/Capture/` | カメラ(バックカメラ・4:3・毎秒 5 回)、傾き(Core Motion)、端末内 AI、フレームから特徴量まで |
-| `Sources/Session/` | 学習の実行(StudySession を動かし、声と音で知らせる。うとうとの注意音、居眠りのアラーム、区切りのやさしい音) |
+| `Sources/Session/` | 学習の実行(StudySession を動かし、声と音で知らせる。うとうとの注意音、居眠りのアラーム、区切りのやさしい音。消音モードの振動。熱いときは解析の回数を下げ、電池が 15% で知らせ、5% で保存して終える) |
 | `Sources/Store/` | 端末の DB(SQLite、GRDB)。1 分ごとに保存し、強制終了されても次の起動で締める。映像・画像・特徴点は保存しない |
 | `Sources/Views/` | 画面(設計書 5.5 の見た目:方眼ノートの背景、付箋、ランプ)。オンボーディング(映像の扱いの図と同意、学年、カメラの許可)、ホーム、設定、置く前の説明、位置合わせと儀式、学習中(ランプの灯り。触れると一時停止)、一時停止(休憩に切り替えられる)、休憩(ヒント)、結果カード(集中の波、ホームに貼る、体感の 1 タップ)、検証モードの結果 |
 
@@ -76,6 +77,18 @@ node tools/export-parity-fixtures.mjs   # 突き合わせ用のデータを作�
 案内のしかた(ホームで選ぶ):「声と音」と「消音(振動だけ)」。消音では、区切りを振動の回数で知らせる(`Sources/Session/Vibrator.swift`)。声と音のときにイヤホンをつけていなければ、周りに人がいるときはイヤホンか消音を勧める。
 
 まだ入れていないもの:カメラを許可しないときの、時間だけを記録する使い方(保留)。
+
+### 版と署名
+
+- `Config/App.xcconfig`:アプリの版(MARKETING_VERSION)、ビルド番号、Bundle ID。アプリの target だけに効く。
+- `Resources/Assets.xcassets`:アプリのアイコン(仮。設計書 5.5 の「机と日誌」の色で描いたもの)。
+- `Resources/PrivacyInfo.xcprivacy`:プライバシーの申告(追跡しない。端末の外に送るデータはない)。
+- `scripts/asc_signing.py`:TestFlight に送るときの署名を、App Store Connect の API で用意する。配布用の証明書の鍵は API キーから毎回同じものを作るので、鍵をどこにも保存せず、証明書を取り消さずに使い続けられる。`self-test` で作り方だけを確かめられる。
+
+### TestFlight に送る
+
+`.github/workflows/testflight.yml`(Mac)。tag `testflight-*` を push するか、Actions の画面で「Run workflow」を押すと、署名して App Store Connect に送る。ビルド番号は、この流れの実行番号。
+Secrets(`ASC_KEY_ID`・`ASC_ISSUER_ID`・`ASC_PRIVATE_KEY`・`APPLE_TEAM_ID`)と変数 `BUNDLE_ID` がまだないときや、この流れの設定を変えたときは、送らずに Release のビルドまで確かめる(dry run)。
 
 ### ビルド
 

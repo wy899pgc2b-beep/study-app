@@ -66,6 +66,16 @@ final class SessionRunner {
   private(set) var soundMode: SoundMode = .voice
   private let vibrator = Vibrator()
   private var lastNudgeT: Double?
+  // 熱と電池(MVP の設計 5 章「端末の制御」)
+  private var baseFps = 5.0
+  private var thermal: ThermalLevel = .nominal
+  private var thermalMax: ThermalLevel = .nominal
+  private var heatWarned = false
+  private var batteryWarned = false
+  private var batteryStart: Double?
+  private var chargedDuring = false
+  private var lowPowerAtStart = false
+  @ObservationIgnored private var powerObservers: [NSObjectProtocol] = []
 
   struct DebugInfo: Equatable {
     var fps = 0.0
@@ -128,6 +138,11 @@ final class SessionRunner {
     perfMs = []
     perfFirstT = nil
     perfLastT = nil
+    heatWarned = false
+    batteryWarned = false
+    batteryStart = nil
+    chargedDuring = false
+    thermalMax = .nominal
     guard await CameraSource.requestAccess() else {
       status = .cameraDenied
       usage("camera_denied_shown")
@@ -139,7 +154,10 @@ final class SessionRunner {
       let camera = CameraSource()
       try camera.configure()
       let cfg = AnalysisConfig()
-      camera.fps = cfg.analysisFps
+      baseFps = cfg.analysisFps
+      thermal = Self.thermalLevel()
+      thermalMax = thermal
+      camera.fps = PowerPolicy.analysisFps(base: baseFps, thermal: thermal)
       let pipeline = FramePipeline(vision: vision, motion: motion, cfg: cfg)
       camera.onFrame = { [weak self, pipeline] pixelBuffer, ms in
         do {
@@ -164,6 +182,7 @@ final class SessionRunner {
       motion.start()
       camera.start()
       status = .running
+      startPowerWatch()
       handle(cues)
     } catch {
       status = .failed(error.localizedDescription)
@@ -336,6 +355,8 @@ final class SessionRunner {
     wallStart = Date()
     tStart = t0
     studyStartedAt = wallStart
+    batteryStart = Self.batteryLevel()
+    lowPowerAtStart = ProcessInfo.processInfo.isLowPowerModeEnabled
     if mode == .scenario {
       usage("scenario_start", ["setup": s.setup.rawValue])
       return
@@ -390,6 +411,7 @@ final class SessionRunner {
   }
 
   private func stopDevices() {
+    stopPowerWatch()
     clearPause()
     breakTimer?.invalidate()
     breakTimer = nil
@@ -466,8 +488,15 @@ final class SessionRunner {
   private func writeExport(summary: SessionSummary, session s: StudySession, reason: String, endT: Double) {
     let t0 = s.startT ?? endT
     let spanSec = perfFirstT.flatMap { a in perfLastT.map { ($0 - a) / 1000 } } ?? 0
-    let perf = perfSummary(
+    var perf = perfSummary(
       perfMs, frames: perfMs.count, spanSec: spanSec, errors: debug.errors, videoSize: videoSize, device: Self.deviceModel(), fov: fovDeg)
+    let batteryEnd = Self.batteryLevel()
+    perf.batteryStart = batteryStart
+    perf.batteryEnd = batteryEnd
+    perf.batteryPerHour = chargedDuring ? nil : PowerPolicy.batteryPerHour(start: batteryStart, end: batteryEnd, hours: (endT - t0) / 3_600_000)
+    perf.charging = chargedDuring
+    perf.thermalMax = thermalMax.name
+    perf.lowPowerMode = lowPowerAtStart
     let export = SessionExport(
       appVersion: Self.appVersion, createdAt: wallStart, reason: reason, mode: mode.rawValue, session: s, summary: summary,
       durationSec: (endT - t0) / 1000, scenario: scenarioResults, scenarioRemaining: mode == .scenario ? scenarioRemaining : nil, perf: perf)
@@ -493,6 +522,80 @@ final class SessionRunner {
     uname(&info)
     return withUnsafeBytes(of: &info.machine) { raw in
       String(decoding: raw.prefix { $0 != 0 }, as: UTF8.self)
+    }
+  }
+
+  // MARK: - 熱と電池
+
+  static func thermalLevel() -> ThermalLevel {
+    switch ProcessInfo.processInfo.thermalState {
+    case .nominal: return .nominal
+    case .fair: return .fair
+    case .serious: return .serious
+    case .critical: return .critical
+    @unknown default: return .serious
+    }
+  }
+
+  /// 電池の残り(0〜1)。分からなければ nil
+  static func batteryLevel() -> Double? {
+    UIDevice.current.isBatteryMonitoringEnabled = true
+    let level = Double(UIDevice.current.batteryLevel)
+    return level >= 0 ? level : nil
+  }
+
+  static var isCharging: Bool {
+    UIDevice.current.isBatteryMonitoringEnabled = true
+    return [.charging, .full].contains(UIDevice.current.batteryState)
+  }
+
+  private func startPowerWatch() {
+    UIDevice.current.isBatteryMonitoringEnabled = true
+    let center = NotificationCenter.default
+    let names: [Notification.Name] = [
+      ProcessInfo.thermalStateDidChangeNotification, UIDevice.batteryLevelDidChangeNotification, UIDevice.batteryStateDidChangeNotification,
+    ]
+    powerObservers = names.map { name in
+      center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+        Task { @MainActor in self?.checkPower() }
+      }
+    }
+    checkPower()
+  }
+
+  private func stopPowerWatch() {
+    powerObservers.forEach { NotificationCenter.default.removeObserver($0) }
+    powerObservers = []
+  }
+
+  /// 熱いときは解析の回数を下げ、それでも熱ければ知らせる。電池が 15% で知らせ、5% で保存して終える
+  private func checkPower() {
+    guard session != nil else { return }
+    let level = Self.thermalLevel()
+    if level != thermal {
+      thermal = level
+      thermalMax = Swift.max(thermalMax, level)
+      camera?.setAnalysisFps(PowerPolicy.analysisFps(base: baseFps, thermal: level))
+      usage("thermal_state", ["state": level.name])
+    }
+    if PowerPolicy.shouldWarnHeat(level) && !heatWarned {
+      heatWarned = true
+      say("スマホが熱くなっています。充電をはずすか、少し休憩しましょう")
+    }
+    let charging = Self.isCharging
+    if charging { chargedDuring = true }
+    switch PowerPolicy.batteryAction(level: Self.batteryLevel() ?? -1, charging: charging, warned: batteryWarned) {
+    case .none:
+      break
+    case .warn:
+      batteryWarned = true
+      usage("battery_low_warned")
+      say("電池が残り少なくなっています。充電しながら使うと安心です")
+    case .finish:
+      usage("battery_low_finished")
+      finish(reason: "battery_low")
+      say("電池が少なくなったので、記録を保存して終わりました")
+      onAutoFinish?()
     }
   }
 

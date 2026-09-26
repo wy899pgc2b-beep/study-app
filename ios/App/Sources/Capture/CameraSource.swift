@@ -79,6 +79,11 @@ final class CameraSource: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate
     return candidates.min { abs(width($0) - 1280) < abs(width($1) - 1280) }
   }
 
+  /// 解析する回数を変える(熱いときに下げる)。フレームを受け取る列で書き換える
+  func setAnalysisFps(_ value: Double) {
+    frameQueue.async { [weak self] in self?.fps = value }
+  }
+
   func start() {
     sessionQueue.async { [session] in
       if !session.isRunning { session.startRunning() }

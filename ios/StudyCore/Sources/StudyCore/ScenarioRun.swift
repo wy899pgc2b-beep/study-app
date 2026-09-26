@@ -141,6 +141,13 @@ public struct SessionExport: Encodable, Sendable {
     public var videoSize: String?
     public var device: String
     public var fovLongSideDeg: Double?
+    /// 電池の残り(0〜1)と 1 時間あたりの減り(%)。充電していたか。いちばん熱かった段階(MVP の完了の条件 6 を確かめる)
+    public var batteryStart: Double? = nil
+    public var batteryEnd: Double? = nil
+    public var batteryPerHour: Double? = nil
+    public var charging: Bool? = nil
+    public var thermalMax: String? = nil
+    public var lowPowerMode: Bool? = nil
   }
 
   public var version = 1

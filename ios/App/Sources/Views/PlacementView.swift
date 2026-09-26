@@ -52,6 +52,12 @@ struct PlacementView: View {
               .foregroundStyle(Palette.subInk)
           }
           SoundAdvice(mode: model.settings.soundMode, headphones: model.headphones)
+          if !ProcessInfo.processInfo.isLowPowerModeEnabled && !SessionRunner.isCharging {
+            // 低電力モードがオフなら、始める前に案内する(MVP の設計 5 章「端末の制御」)
+            Label("長く使うときは、充電しながら使うか、低電力モードをオンにすると電池が長持ちするよ(コントロールセンターで切り替えられるよ)", systemImage: "battery.50")
+              .font(AppFont.regular(14))
+              .foregroundStyle(Palette.subInk)
+          }
           Button("置いたよ") { model.start() }
             .buttonStyle(PrimaryButtonStyle(height: 72, fontSize: 24))
           Button("次からはこの説明を省く") {

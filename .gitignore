@@ -16,3 +16,20 @@ Pods/
 node_modules/
 
 .DS_Store
+
+# アプリの書き出し(学習の記録。入れない)
+tsukuelog-*.json
+
+# 生成するもの・取ってくるもの
+ios/App/*.xcodeproj/
+ios/App/*.xcworkspace/
+ios/App/Generated/
+ios/App/Resources/Models/
+ios/App/Resources/Fonts/
+
+# 署名の鍵と設定(GitHub の Secrets に置く。リポジトリには絶対に入れない)
+ios/App/Config/Signing.xcconfig
+*.p8
+*.p12
+*.mobileprovision
+*.cer
