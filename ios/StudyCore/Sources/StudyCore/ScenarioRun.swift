@@ -10,49 +10,111 @@ public enum ScenarioCue: Equatable, Sendable {
   case done
 }
 
-/// 検証シナリオの進み具合と、場面ごとの記録
+/// 検証シナリオの進み具合と、場面ごとの記録。
+/// 9 場面の一部だけを行える(前に飛ばした場面を、あとで行うとき)。一時停止したら今の場面を指示からやり直すか、飛ばす
 public struct ScenarioRun: Sendable {
   public let setup: SetupStyle
+  /// この回に行う場面(Scenario.phases の番号。順番どおり)
+  public let order: [Int]
   public private(set) var samples: [String: [ScenarioSample]] = [:]
   public private(set) var position: Scenario.Position?
   public private(set) var finished = false
-  private var index = -1
-  private var inTransition: Bool?
+  /// 最後まで行った場面と、飛ばした場面(id)
+  public private(set) var completed: [String] = []
+  public private(set) var skipped: [String] = []
+  private var step = 0
+  /// 今の場面の指示を始めた時刻(計測を始めてからの秒数)。nil なら次の update から始める
+  private var stepStartSec: Double?
+  private var announcedStep: Int?
+  private var announcedTransition: Bool?
 
-  public init(setup: SetupStyle) {
+  /// phases:行う場面の番号(省くと 9 場面すべて)
+  public init(setup: SetupStyle, phases: [Int]? = nil) {
     self.setup = setup
+    order = (phases ?? Array(Scenario.phases.indices)).filter { Scenario.phases.indices.contains($0) }.sorted()
   }
+
+  /// この回に行う場面の数と、かかる秒数
+  public var count: Int { order.count }
+  public var totalSec: Double { order.reduce(0) { $0 + Scenario.transitionSec + Scenario.phases[$1].sec } }
+
+  /// この回の中で何番目か(1 から)
+  public func number(ofPhase index: Int) -> Int { (order.firstIndex(of: index) ?? 0) + 1 }
+
+  /// 今の場面(Scenario.phases の番号。終わっていれば nil)
+  public var currentIndex: Int? { !finished && step < order.count ? order[step] : nil }
+
+  /// まだ最後まで行っていない場面(飛ばした場面、途中でやめた場面、まだ始めていない場面。id)
+  public var remaining: [String] { order.map { Scenario.phases[$0].id }.filter { !completed.contains($0) } }
 
   /// elapsedSec:計測を始めてからの秒数。dt・kind・output:このフレームの時間と判定(判定しなかったときは output が nil)
   public mutating func update(elapsedSec: Double, dt: Double, kind: TimeKind, output: AnalysisOutput?) -> [ScenarioCue] {
     guard !finished else { return [] }
-    guard let pa = Scenario.phaseAt(elapsedSec) else {
+    if stepStartSec == nil { stepStartSec = elapsedSec }
+    // 場面の終わりを過ぎたら次の場面へ。続けて行うときは時刻を足していく(試作品の phaseAt と同じ区切りになる)
+    while step < order.count, let s0 = stepStartSec, elapsedSec >= s0 + stepSec(step) {
+      completed.append(Scenario.phases[order[step]].id)
+      stepStartSec = s0 + stepSec(step)
+      step += 1
+    }
+    guard step < order.count, let s0 = stepStartSec else {
       finished = true
       position = nil
       return [.done]
     }
+    let index = order[step]
+    let phaseStart = s0 + Scenario.transitionSec
+    let inTransition = elapsedSec < phaseStart
+    let pa = Scenario.Position(index: index, inTransition: inTransition, phaseElapsed: inTransition ? 0 : elapsedSec - phaseStart)
     position = pa
     var cues: [ScenarioCue] = []
-    if pa.index != index || pa.inTransition != inTransition {
-      cues.append(pa.inTransition ? .phaseIntro(index: pa.index) : .phaseStart(index: pa.index))
-      index = pa.index
-      inTransition = pa.inTransition
+    if step != announcedStep || inTransition != announcedTransition {
+      cues.append(inTransition ? .phaseIntro(index: index) : .phaseStart(index: index))
+      announcedStep = step
+      announcedTransition = inTransition
     }
-    if !pa.inTransition {
-      let id = Scenario.phases[pa.index].id
-      samples[id, default: []].append(ScenarioSample(phaseElapsed: pa.phaseElapsed, dt: dt, kind: kind, output: output))
+    if !inTransition {
+      samples[Scenario.phases[index].id, default: []].append(ScenarioSample(phaseElapsed: pa.phaseElapsed, dt: dt, kind: kind, output: output))
     }
     return cues
   }
 
-  public func results() -> [PhaseResult] {
-    Scenario.phases.map { evaluatePhase($0, samples: samples[$0.id] ?? [], setup: setup) }
+  /// 今の場面を飛ばす(あとで行う)。次の update から、次の場面の指示を始める
+  public mutating func skipCurrent() {
+    guard !finished, step < order.count else { return }
+    let id = Scenario.phases[order[step]].id
+    samples[id] = nil
+    if !skipped.contains(id) { skipped.append(id) }
+    step += 1
+    stepStartSec = nil
+    announcedStep = nil
+    position = nil
   }
 
-  /// 読み上げる指示(「3つめ。顔を上げたまま、…」)
-  public static func introSpeech(_ index: Int) -> String {
-    "\(index + 1)つめ。\(Scenario.phases[index].speech)"
+  /// 今の場面を、指示からやり直す(一時停止から戻ったとき。途中までの記録は捨てる)
+  public mutating func restartCurrent() {
+    guard !finished, step < order.count else { return }
+    samples[Scenario.phases[order[step]].id] = nil
+    stepStartSec = nil
+    announcedStep = nil
+    position = nil
   }
+
+  /// 最後まで行った場面の採点(順番どおり)
+  public func results() -> [PhaseResult] {
+    order.map { Scenario.phases[$0] }.filter { completed.contains($0.id) }.map {
+      evaluatePhase($0, samples: samples[$0.id] ?? [], setup: setup)
+    }
+  }
+
+  /// 読み上げる指示(「3つめ。顔を上げたまま、…」)。最初の場面では、場面の数も伝える
+  public func introSpeech(_ index: Int) -> String {
+    let n = number(ofPhase: index)
+    let head = n == 1 ? "全部で\(order.count)場面です。" : ""
+    return "\(head)\(n)つめ。\(Scenario.phases[index].speech)"
+  }
+
+  private func stepSec(_ step: Int) -> Double { Scenario.transitionSec + Scenario.phases[order[step]].sec }
 }
 
 /// 1 回の学習の記録の書き出し(試作品の結果の JSON と同じ形。映像・画像・特徴点は含めない)。
@@ -96,11 +158,13 @@ public struct SessionExport: Encodable, Sendable {
   public var minutes: [Minute]
   public var events: [Event]
   public var scenario: [PhaseResult]?
+  /// 検証モードで、この回に最後まで行わなかった場面(あとで行う)
+  public var scenarioRemaining: [String]?
   public var perf: Perf
 
   public init(
     appVersion: String, createdAt: Date, reason: String, mode: String, session: StudySession, summary: SessionSummary, durationSec: Double,
-    scenario: [PhaseResult]?, perf: Perf
+    scenario: [PhaseResult]?, scenarioRemaining: [String]? = nil, perf: Perf
   ) {
     self.appVersion = appVersion
     self.createdAt = createdAt
@@ -118,6 +182,7 @@ public struct SessionExport: Encodable, Sendable {
     }
     events = (recorder?.events ?? []).map { Event(type: $0.type.rawValue, sec: jsRound(($0.t - start) / 100) / 10) }
     self.scenario = scenario
+    self.scenarioRemaining = scenarioRemaining
     self.perf = perf
   }
 

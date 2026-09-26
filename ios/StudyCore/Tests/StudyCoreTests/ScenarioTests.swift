@@ -91,13 +91,99 @@ final class ScenarioRunTests: XCTestCase {
     // 最初の場面は、指示の 5 秒の後に始まる
     let start0 = cues.first { $0.1 == .phaseStart(index: 0) }?.0 ?? 0
     XCTAssertEqual(start0, 5, accuracy: 0.21)
-    XCTAssertEqual(ScenarioRun.introSpeech(2), "3つめ。顔を上げたまま、目を閉じてください。音が鳴るまで開けないでください")
+    XCTAssertEqual(run.introSpeech(2), "3つめ。顔を上げたまま、目を閉じてください。音が鳴るまで開けないでください")
+    XCTAssertTrue(run.introSpeech(0).hasPrefix("全部で9場面です。1つめ。"))
+    XCTAssertEqual(run.completed, Scenario.phases.map(\.id))
+    XCTAssertEqual(run.remaining, [])
     let results = run.results()
     XCTAssertEqual(results.map(\.id), Scenario.phases.map(\.id))
     // 「読む」は思考だけだったので合格、「書く」は作業がないので不合格
     XCTAssertEqual(results[0].pass, true)
     XCTAssertEqual(results[1].pass, false)
     XCTAssertEqual(Double(run.samples["read"]?.count ?? 0), 125, accuracy: 1)
+  }
+
+  /// 続けて行うときの区切りは、試作品の phaseAt と同じ
+  func testRunMatchesPhaseAt() {
+    var run = ScenarioRun(setup: .stand)
+    var t = 0.0
+    while !run.finished && t < 400 {
+      _ = run.update(elapsedSec: t, dt: 0.2, kind: .think, output: nil)
+      if !run.finished { XCTAssertEqual(run.position, Scenario.phaseAt(t), "t \(t)") }
+      t += 0.2
+    }
+    XCTAssertTrue(run.finished)
+  }
+
+  /// 場面を飛ばすと、次の場面の指示から始まり、飛ばした場面は「あとで」に残る
+  func testSkipAndRestart() {
+    var run = ScenarioRun(setup: .landscape)
+    var cues: [ScenarioCue] = []
+    var t = 0.0
+    func advance(to end: Double) {
+      while t < end && !run.finished {
+        cues += run.update(elapsedSec: t, dt: 0.2, kind: .think, output: nil)
+        t += 0.2
+      }
+    }
+    // 1 つめ(読む)の途中で一時停止して、やり直す
+    advance(to: 15)
+    XCTAssertEqual(run.position?.index, 0)
+    XCTAssertFalse(run.samples["read"]?.isEmpty ?? true)
+    run.restartCurrent()
+    XCTAssertNil(run.samples["read"], "途中までの記録は捨てる")
+    cues = []
+    advance(to: 16)
+    XCTAssertEqual(cues.first, .phaseIntro(index: 0), "指示からやり直す")
+    // 1 つめを最後まで行い、2 つめ(書く)を飛ばす
+    advance(to: 16 + 30.2)
+    XCTAssertEqual(run.completed, ["read"])
+    XCTAssertEqual(run.position?.index, 1)
+    run.skipCurrent()
+    cues = []
+    advance(to: t + 1)
+    XCTAssertEqual(cues.first, .phaseIntro(index: 2), "次の場面の指示から")
+    XCTAssertEqual(run.skipped, ["write"])
+    XCTAssertNil(run.samples["write"])
+    // 残りを最後まで行う
+    advance(to: 1000)
+    XCTAssertTrue(run.finished)
+    XCTAssertEqual(run.remaining, ["write"])
+    XCTAssertEqual(run.results().map(\.id), Scenario.phases.map(\.id).filter { $0 != "write" })
+  }
+
+  /// 飛ばした場面だけを、あとで行う
+  func testRunOnlyRemainingPhases() {
+    var run = ScenarioRun(setup: .landscape, phases: [8, 1, 99])
+    XCTAssertEqual(run.order, [1, 8], "順番どおり。ない番号は除く")
+    XCTAssertEqual(run.totalSec, 2 * Scenario.transitionSec + Scenario.phases[1].sec + Scenario.phases[8].sec)
+    XCTAssertEqual(run.introSpeech(1), "全部で2場面です。1つめ。ペンを持って、ノートに文字を書いてください")
+    XCTAssertTrue(run.introSpeech(8).hasPrefix("2つめ。"))
+    var intros: [Int] = []
+    var t = 0.0
+    while !run.finished && t < 200 {
+      for c in run.update(elapsedSec: t, dt: 0.2, kind: .away, output: nil) {
+        if case .phaseIntro(let i) = c { intros.append(i) }
+      }
+      t += 0.2
+    }
+    XCTAssertEqual(intros, [1, 8])
+    XCTAssertEqual(t, run.totalSec, accuracy: 0.5)
+    XCTAssertEqual(run.completed, ["write", "leave"])
+    XCTAssertEqual(run.results().map(\.id), ["write", "leave"])
+  }
+
+  /// 最初の場面の前に飛ばしたり、最後の場面を飛ばしたりしても終わる
+  func testSkipEdges() {
+    var run = ScenarioRun(setup: .stand, phases: [0])
+    run.skipCurrent()
+    XCTAssertEqual(run.update(elapsedSec: 0, dt: 0, kind: .think, output: nil), [.done])
+    XCTAssertTrue(run.finished)
+    XCTAssertEqual(run.remaining, ["read"])
+    XCTAssertEqual(run.results().count, 0)
+    run.skipCurrent()
+    run.restartCurrent()
+    XCTAssertEqual(run.update(elapsedSec: 1, dt: 0.2, kind: .think, output: nil), [])
   }
 
   func testExportEncodes() throws {
