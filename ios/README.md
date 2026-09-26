@@ -81,7 +81,7 @@ node tools/export-parity-fixtures.mjs   # 突き合わせ用のデータを作�
 ### 版と署名
 
 - `Config/App.xcconfig`:アプリの版(MARKETING_VERSION)、ビルド番号、Bundle ID。アプリの target だけに効く。
-- `Resources/Assets.xcassets`:アプリのアイコン(決定事項 D-22)。シンプルで、綺麗で美しく整った見た目(アニメ映画のタイトルのような上品さ)。アプリ名は略さずに入れる:細い金の輪の中に、明朝の「ツクエ」「ログ」の 2 行(字と字のあいだは字の形の幅でそろえ、輪に収まる大きさにする)。輪の真上にキラッ。背景は夕方から夜へ移る空。`scripts/make_icon.py` で作る(文字は しっぽり明朝 B1。SIL Open Font License。作るときに取ってくる。`--layout line`・`--palette green` でほかの案も作れる)。
+- `Resources/Assets.xcassets`:アプリのアイコン(決定事項 D-22。利用者の考えたデザイン)。正方形を上 7 割と下 3 割に分け、ベースは真っ白。上 7 割にエメラルドグリーンの横長の長方形と平仮名の「つくえ」(白)、下 3 割に黒い「Log」。`scripts/make_icon.py` で作る(文字は しっぽり明朝 B1。SIL Open Font License。作るときに取ってくる。`--text-color`(white・black・gray・indigo)と `--band`(inset・full)で、ほかの案も作れる)。
 - `Resources/PrivacyInfo.xcprivacy`:プライバシーの申告(追跡しない。端末の外に送るデータはない)。
 - `scripts/asc_signing.py`:TestFlight に送るときの署名を、App Store Connect の API で用意する。配布用の証明書の鍵は API キーから毎回同じものを作るので、鍵をどこにも保存せず、証明書を取り消さずに使い続けられる。`self-test` で作り方だけを確かめられる。
 
