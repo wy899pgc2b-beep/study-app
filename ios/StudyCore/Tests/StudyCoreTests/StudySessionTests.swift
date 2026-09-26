@@ -143,6 +143,18 @@ final class StudySessionTests: XCTestCase {
     XCTAssertEqual(summary?.studySec ?? 0, 60, accuracy: 0.5, "休憩と位置の確認は学習時間に入れない")
   }
 
+  func testBreakFromPauseUsesGivenMinutes() {
+    var s = StudySession(breakTimer: BreakTimer(enabled: false))
+    var cues: [SessionCue] = []
+    let t = runRitual(&s, from: 0, cues: &cues)
+    s.pause(at: t + 1000, reason: .touch)
+    s.startBreak(at: t + 2000, minutes: 5)
+    XCTAssertEqual(s.phase, .onBreak)
+    XCTAssertEqual(s.currentBreakMin, 5)
+    XCTAssertEqual(s.tick(at: t + 2000 + 4 * 60_000), [])
+    XCTAssertEqual(s.tick(at: t + 2000 + 5 * 60_000), [.breakOver])
+  }
+
   func testPauseCount() {
     var s = StudySession()
     var cues: [SessionCue] = []

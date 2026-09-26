@@ -100,3 +100,28 @@ final class ResultCardTests: XCTestCase {
     XCTAssertTrue(ResultCardText.nextStep.values.allSatisfy { $0.count >= 3 })
   }
 }
+
+/// 体感と判定を並べる一言(設計書 3.14 の要件 4)
+final class SelfRatingCommentTests: XCTestCase {
+  func testLevels() {
+    XCTAssertEqual(FocusLevel(avgFocus: 70), .high)
+    XCTAssertEqual(FocusLevel(avgFocus: 69), .middle)
+    XCTAssertEqual(FocusLevel(avgFocus: 45), .middle)
+    XCTAssertEqual(FocusLevel(avgFocus: 44), .low)
+    XCTAssertNil(FocusLevel(avgFocus: nil))
+  }
+
+  func testComments() {
+    XCTAssertEqual(selfRatingComment(.good, avgFocus: 80, focusMin: 48), "「集中できた」の感覚どおり、48分しっかり集中していたよ")
+    XCTAssertEqual(selfRatingComment(.poor, avgFocus: 80, focusMin: 48.4), "感覚よりも、実際は集中できていたよ(48分)")
+    XCTAssertEqual(selfRatingComment(.good, avgFocus: 30, focusMin: 12), "集中できた感覚は大切にしよう。記録では12分の集中だったよ")
+    XCTAssertTrue(selfRatingComment(.normal, avgFocus: nil, focusMin: 0).contains("記録したよ"))
+    // どの組み合わせでも責める言葉を使わない
+    for r in SelfRating.allCases {
+      for v in [nil, 10, 50, 90] as [Int?] {
+        let text = selfRatingComment(r, avgFocus: v, focusMin: 30)
+        XCTAssertFalse(text.contains("評価") || text.contains("監視") || text.contains("ダメ"), text)
+      }
+    }
+  }
+}

@@ -27,6 +27,10 @@ targets:
       - path: Resources/Models
         type: folder
         buildPhase: resources
+      # 画面の文字(scripts/fetch-fonts.sh で取ってくる。SIL Open Font License)
+      - path: Resources/Fonts
+        type: folder
+        buildPhase: resources
     dependencies:
       - package: StudyCore
       - package: GRDB
@@ -45,6 +49,10 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         UIRequiresFullScreen: true
+        UIAppFonts:
+          - Fonts/ZenMaruGothic-Regular.ttf
+          - Fonts/ZenMaruGothic-Medium.ttf
+          - Fonts/ZenMaruGothic-Bold.ttf
         ITSAppUsesNonExemptEncryption: false
     settings:
       base:

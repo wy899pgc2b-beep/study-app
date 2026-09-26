@@ -23,6 +23,16 @@ final class SessionRunner {
   /// 確認用の表示(開発中だけ使う)
   private(set) var debug = DebugInfo()
   private(set) var breakEndsAt: Date?
+  /// いまの休憩の長さ(秒。残り時間の輪に使う)
+  private(set) var breakTotalSec: Double = 0
+  /// 計測を始めた時刻(学習中の経過時間に使う)
+  private(set) var studyStartedAt: Date?
+  /// 一時停止した時刻と、そのときまでの集計(一時停止の画面に出す)
+  private(set) var pausedAt: Date?
+  private(set) var pauseSummary: SessionSummary?
+  /// 一時停止のまま 10 分たった(終了するかを尋ねる。設計書 3.11 の要件 8)
+  private(set) var pausedLong = false
+  private var pauseTimer: Timer?
 
   struct DebugInfo: Equatable {
     var fps = 0.0
@@ -119,13 +129,48 @@ final class SessionRunner {
     session?.pause(at: Self.now(), reason: reason)
     phase = session?.phase
     sound.stopAlarm()
+    pausedAt = Date()
+    pauseSummary = session?.recorder?.summary()
+    pausedLong = false
+    pauseTimer?.invalidate()
+    pauseTimer = Timer.scheduledTimer(withTimeInterval: 600, repeats: false) { [weak self] _ in
+      Task { @MainActor in
+        guard let self, self.session?.isPaused == true else { return }
+        self.pausedLong = true
+        self.voice.say("一時停止から10分たちました。今日はここまでにしますか")
+      }
+    }
     usage("session_pause", ["reason": reason == .touch ? "touch" : "app"])
+  }
+
+  /// 一時停止の画面から休憩にするときの長さ(休憩タイマーの休憩の長さ。使っていなければ 5 分)
+  var pauseBreakMinutes: Int {
+    guard let t = session?.breakTimer, t.enabled else { return 5 }
+    return t.breakMin
+  }
+
+  /// 一時停止から、そのまま休憩に切り替える(設計書 3.11 の要件 9)
+  func breakFromPause() {
+    guard session?.isPaused == true else { return }
+    let minutes = pauseBreakMinutes
+    session?.startBreak(at: Self.now(), minutes: minutes)
+    clearPause()
+    phase = session?.phase
+    startBreakCountdown(minutes: minutes)
+  }
+
+  private func clearPause() {
+    pauseTimer?.invalidate()
+    pauseTimer = nil
+    pausedAt = nil
+    pausedLong = false
   }
 
   func resume() {
     guard session?.isPaused == true else { return }
     session?.resume(at: Self.now())
     phase = session?.phase
+    clearPause()
     usage("session_resume")
     persistProgress()
   }
@@ -195,6 +240,7 @@ final class SessionRunner {
     guard let s = session, let t0 = s.startT else { return }
     wallStart = Date()
     tStart = t0
+    studyStartedAt = wallStart
     let timer = s.breakTimer
     let preset =
       !timer.enabled ? "none" : timer.studyMin == 25 && timer.breakMin == 5 ? "25_5" : timer.studyMin == 50 && timer.breakMin == 10 ? "50_10" : "custom"
@@ -243,6 +289,7 @@ final class SessionRunner {
   }
 
   private func stopDevices() {
+    clearPause()
     breakTimer?.invalidate()
     breakTimer = nil
     breakEndsAt = nil
@@ -308,7 +355,7 @@ final class SessionRunner {
         sound.gentle()
         voice.say("学習に戻ります")
       case .breakDue:
-        startBreakCountdown()
+        startBreakCountdown(minutes: session?.currentBreakMin ?? 5)
       case .breakOver:
         sound.gentle()
         voice.say("休憩の時間が終わりました。準備ができたら、休憩を終えるを押してください")
@@ -320,8 +367,7 @@ final class SessionRunner {
     }
   }
 
-  private func startBreakCountdown() {
-    guard let minutes = session?.breakTimer.breakMin else { return }
+  private func startBreakCountdown(minutes: Int) {
     // 休憩中はカメラを止める(MVP の設計 3 章)
     camera?.stop()
     sound.stopAlarm()
@@ -329,6 +375,7 @@ final class SessionRunner {
     usage("break_start")
     voice.say("休憩の時間です。\(minutes)分休みましょう", interrupt: true)
     breakEndsAt = Date().addingTimeInterval(Double(minutes) * 60)
+    breakTotalSec = Double(minutes) * 60
     breakTimer?.invalidate()
     breakTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
       Task { @MainActor in

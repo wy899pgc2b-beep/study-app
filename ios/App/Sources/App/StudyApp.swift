@@ -20,6 +20,7 @@ struct RootView: View {
     Group {
       switch model.screen {
       case .home: HomeView()
+      case .placement: PlacementView()
       case .session: SessionView()
       case .result: ResultView()
       }

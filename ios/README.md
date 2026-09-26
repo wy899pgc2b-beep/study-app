@@ -62,10 +62,11 @@ node tools/export-parity-fixtures.mjs   # 突き合わせ用のデータを作�
 | `project.yml` | Xcode のプロジェクトの設定(XcodeGen)。Bundle ID は仮(`com.example.studyapp`) |
 | `Podfile` | MediaPipe(`MediaPipeTasksVision`) |
 | `scripts/fetch-models.sh` | MediaPipe のモデルを取ってくる(試作品と同じ 4 つ。リポジトリには入れない) |
+| `scripts/fetch-fonts.sh` | 画面の文字 Zen Maru Gothic(SIL Open Font License)を、ライセンスの文書と一緒に取ってくる |
 | `Sources/Capture/` | カメラ(バックカメラ・4:3・毎秒 5 回)、傾き(Core Motion)、端末内 AI、フレームから特徴量まで |
 | `Sources/Session/` | 学習の実行(StudySession を動かし、声と音で知らせる。うとうとの注意音、居眠りのアラーム、区切りのやさしい音) |
 | `Sources/Store/` | 端末の DB(SQLite、GRDB)。1 分ごとに保存し、強制終了されても次の起動で締める。映像・画像・特徴点は保存しない |
-| `Sources/Views/` | ホーム(今日の集中時間、休憩タイマーのスイッチ)、位置合わせ、学習中(画面は黒。触れると一時停止)、結果カード(体感の 1 タップ) |
+| `Sources/Views/` | 画面(設計書 5.5 の見た目:方眼ノートの背景、付箋、ランプ)。ホーム、置く前の説明、位置合わせと儀式、学習中(ランプの灯り。触れると一時停止)、一時停止(休憩に切り替えられる)、休憩(ヒント)、結果カード(集中の波、ホームに貼る、体感の 1 タップ) |
 
 まだ入れていないもの:オンボーディング、設定画面、検証モード(記録の書き出し)。
 
@@ -76,6 +77,7 @@ GitHub Actions の `ios-build`(Mac)が、`ios/` を変えたときに署名な�
 ```sh
 cd ios/App
 scripts/fetch-models.sh
+scripts/fetch-fonts.sh
 xcodegen generate
 pod install
 open StudyApp.xcworkspace

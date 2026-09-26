@@ -125,6 +125,8 @@ public struct StudySession: Sendable {
   private var studySinceBreak = 0.0
   private var breakStartT: Double?
   private var breakOverSent = false
+  /// いまの休憩の長さ(分)。休憩タイマーの時間か、一時停止から切り替えたときの時間
+  public private(set) var currentBreakMin = 0
   /// 休憩の後の位置の確認中(儀式は姿勢の記録だけにする)
   private var returningFromBreak = false
   private var openInterval: SessionInterval?
@@ -203,7 +205,8 @@ public struct StudySession: Sendable {
     closeInterval(at: t)
   }
 
-  public mutating func startBreak(at t: Double) {
+  /// 休憩に入る。minutes を省くと休憩タイマーの時間(一時停止の画面から切り替えたときは、画面の側で決めた時間を渡す)
+  public mutating func startBreak(at t: Double, minutes: Int? = nil) {
     guard phase == .studying || isPaused else { return }
     closeSpan(at: t, studying: !isPaused)
     closeInterval(at: t)
@@ -211,6 +214,7 @@ public struct StudySession: Sendable {
     breakStartT = t
     openInterval = SessionInterval(kind: .breakTime, startT: t, endT: t)
     breakOverSent = false
+    currentBreakMin = minutes ?? breakTimer.breakMin
   }
 
   /// 休憩を終える。位置の確認と姿勢の記録をしてから学習に戻る(MVP の設計 3 章)
@@ -333,7 +337,7 @@ public struct StudySession: Sendable {
   }
 
   private mutating func breakStep(at t: Double) -> [SessionCue] {
-    guard let bs = breakStartT, !breakOverSent, (t - bs) / 1000 >= Double(breakTimer.breakMin) * 60 else { return [] }
+    guard let bs = breakStartT, !breakOverSent, (t - bs) / 1000 >= Double(currentBreakMin) * 60 else { return [] }
     breakOverSent = true
     return [.breakOver]
   }
