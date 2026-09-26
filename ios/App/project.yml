@@ -1,5 +1,9 @@
 # Xcode のプロジェクトの設定。`xcodegen generate` で StudyApp.xcodeproj を作る(作ったものはリポジトリに入れない)。
 name: StudyApp
+# スマホ制限の拡張と権限(Apple の許可が下りてから。TK_RESTRICTION=YES xcodegen generate)
+include:
+  - path: restriction.yml
+    enable: ${TK_RESTRICTION}
 options:
   deploymentTarget:
     iOS: "17.0"
@@ -22,6 +26,8 @@ targets:
     platform: iOS
     sources:
       - path: Sources
+      # スマホ制限で、アプリと拡張が共有するもの
+      - path: Restriction
       # MediaPipe のモデル(scripts/fetch-models.sh で取ってくる。リポジトリには入れない)
       - path: Resources/Models
         type: folder
@@ -37,6 +43,8 @@ targets:
         buildPhase: resources
     dependencies:
       - package: StudyCore
+      - package: StudyCore
+        product: RestrictionCore
       - package: GRDB
     info:
       path: Generated/Info.plist
@@ -58,6 +66,9 @@ targets:
           - Fonts/ZenMaruGothic-Medium.ttf
           - Fonts/ZenMaruGothic-Bold.ttf
         ITSAppUsesNonExemptEncryption: false
+        # スマホ制限:拡張と共有する App Group と、Apple の許可を得たビルドか
+        TKAppGroup: "$(TK_APP_GROUP)"
+        TKRestrictionEnabled: "$(TK_RESTRICTION_ENABLED)"
     # 版・Bundle ID・署名は xcconfig に置く(ここに書くと xcconfig より優先されてしまう)
     configFiles:
       Debug: Config/Debug.xcconfig

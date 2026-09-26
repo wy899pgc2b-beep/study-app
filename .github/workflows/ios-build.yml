@@ -32,7 +32,8 @@ jobs:
       - name: Generate the Xcode project
         working-directory: ios/App
         run: |
-          xcodegen generate
+          # スマホ制限の拡張(restriction.yml)も含めて、コンパイルが通るかを確かめる
+          TK_RESTRICTION=YES xcodegen generate
           pod install
       - name: Build for iPhone (no signing)
         working-directory: ios/App
@@ -41,7 +42,19 @@ jobs:
             -workspace StudyApp.xcworkspace -scheme StudyApp -configuration Debug \
             -destination 'generic/platform=iOS' \
             CODE_SIGNING_ALLOWED=NO \
+            -derivedDataPath "$RUNNER_TEMP/dd" \
             build
+      - name: Restriction extensions are embedded
+        run: |
+          APP="$RUNNER_TEMP/dd/Build/Products/Debug-iphoneos/StudyApp.app"
+          ls "$APP/PlugIns"
+          for ext in TKShieldConfiguration TKShieldAction TKMonitor; do
+            test -d "$APP/PlugIns/$ext.appex"
+            /usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPointIdentifier' "$APP/PlugIns/$ext.appex/Info.plist"
+            /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/PlugIns/$ext.appex/Info.plist"
+          done
+          test "$(/usr/libexec/PlistBuddy -c 'Print :TKRestrictionEnabled' "$APP/Info.plist")" = "YES"
+          /usr/libexec/PlistBuddy -c 'Print :TKAppGroup' "$APP/Info.plist"
       - name: Podfile.lock
         if: always()
         working-directory: ios/App

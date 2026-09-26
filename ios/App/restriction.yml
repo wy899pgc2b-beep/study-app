@@ -1,0 +1,129 @@
+# スマホ制限(裏機能。決定事項 D-24、設計書 3.30)の拡張と権限。
+# Apple の許可(Family Controls の Distribution)が必要なので、project.yml の include で、環境変数 TK_RESTRICTION が YES のときだけ読み込む。
+# 許可が下りる前の TestFlight の版は、これを含めずに作る(スマホ制限の画面には「Apple の許可待ち」と出る)。
+targets:
+  StudyApp:
+    dependencies:
+      - target: TKShieldConfiguration
+      - target: TKShieldAction
+      - target: TKMonitor
+    entitlements:
+      path: Generated/StudyApp.entitlements
+      properties:
+        com.apple.developer.family-controls: true
+        com.apple.security.application-groups:
+          - $(TK_APP_GROUP)
+    settings:
+      base:
+        TK_RESTRICTION_ENABLED: "YES"
+
+  # 制限しているアプリを開いたときの画面
+  TKShieldConfiguration:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Extensions/ShieldConfiguration
+      - path: Restriction
+    dependencies:
+      - package: StudyCore
+        product: RestrictionCore
+    configFiles:
+      Debug: Config/Extension.xcconfig
+      Release: Config/Extension.xcconfig
+    info:
+      path: Generated/ShieldConfiguration-Info.plist
+      properties:
+        CFBundleDisplayName: "ツクエログ"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        TKAppGroup: "$(TK_APP_GROUP)"
+        TKRestrictionEnabled: "YES"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.ManagedSettingsUI.shield-configuration-service
+          NSExtensionPrincipalClass: "$(PRODUCT_MODULE_NAME).ShieldConfigurationExtension"
+    entitlements:
+      path: Generated/ShieldConfiguration.entitlements
+      properties:
+        com.apple.developer.family-controls: true
+        com.apple.security.application-groups:
+          - $(TK_APP_GROUP)
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: "$(TK_BASE_BUNDLE_ID).ShieldConfiguration"
+        PROVISIONING_PROFILE_SPECIFIER: "$(TK_PROFILE_SHIELD_CONFIGURATION)"
+        TARGETED_DEVICE_FAMILY: "1"
+        SKIP_INSTALL: "YES"
+
+  # 制限の画面のボタン(休憩する・開く)
+  TKShieldAction:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Extensions/ShieldAction
+      - path: Restriction
+    dependencies:
+      - package: StudyCore
+        product: RestrictionCore
+    configFiles:
+      Debug: Config/Extension.xcconfig
+      Release: Config/Extension.xcconfig
+    info:
+      path: Generated/ShieldAction-Info.plist
+      properties:
+        CFBundleDisplayName: "ツクエログ"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        TKAppGroup: "$(TK_APP_GROUP)"
+        TKRestrictionEnabled: "YES"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.ManagedSettings.shield-action-service
+          NSExtensionPrincipalClass: "$(PRODUCT_MODULE_NAME).ShieldActionExtension"
+    entitlements:
+      path: Generated/ShieldAction.entitlements
+      properties:
+        com.apple.developer.family-controls: true
+        com.apple.security.application-groups:
+          - $(TK_APP_GROUP)
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: "$(TK_BASE_BUNDLE_ID).ShieldAction"
+        PROVISIONING_PROFILE_SPECIFIER: "$(TK_PROFILE_SHIELD_ACTION)"
+        TARGETED_DEVICE_FAMILY: "1"
+        SKIP_INSTALL: "YES"
+
+  # 時間の見張り(集中セッション・休憩・時間割の区間と、使った時間)
+  TKMonitor:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Extensions/Monitor
+      - path: Restriction
+    dependencies:
+      - package: StudyCore
+        product: RestrictionCore
+    configFiles:
+      Debug: Config/Extension.xcconfig
+      Release: Config/Extension.xcconfig
+    info:
+      path: Generated/Monitor-Info.plist
+      properties:
+        CFBundleDisplayName: "ツクエログ"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        TKAppGroup: "$(TK_APP_GROUP)"
+        TKRestrictionEnabled: "YES"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.deviceactivity.monitor-extension
+          NSExtensionPrincipalClass: "$(PRODUCT_MODULE_NAME).MonitorExtension"
+    entitlements:
+      path: Generated/Monitor.entitlements
+      properties:
+        com.apple.developer.family-controls: true
+        com.apple.security.application-groups:
+          - $(TK_APP_GROUP)
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: "$(TK_BASE_BUNDLE_ID).Monitor"
+        PROVISIONING_PROFILE_SPECIFIER: "$(TK_PROFILE_MONITOR)"
+        TARGETED_DEVICE_FAMILY: "1"
+        SKIP_INSTALL: "YES"

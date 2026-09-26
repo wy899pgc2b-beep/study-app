@@ -1,0 +1,2 @@
+// スマホ制限の拡張(制限の画面・ボタン・時間の見張り)の設定。Bundle ID は restriction.yml で、アプリの Bundle ID の後ろにつける
+#include "Base.xcconfig"

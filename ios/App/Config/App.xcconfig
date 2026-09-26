@@ -1,8 +1,6 @@
-// アプリの版と Bundle ID(アプリの target だけに効く。Debug.xcconfig・Release.xcconfig が読み込む)。
-// TestFlight に送る流れ(.github/workflows/testflight.yml)が、送る前に Signing.xcconfig(署名の設定。リポジトリには入れない)を作る。
-MARKETING_VERSION = 0.1.0
-CURRENT_PROJECT_VERSION = 1
-// 仮の Bundle ID。利用者が決めたら、GitHub の変数 BUNDLE_ID で差し替える
-PRODUCT_BUNDLE_IDENTIFIER = com.example.studyapp
+// アプリの target の設定(Debug.xcconfig・Release.xcconfig が読み込む)
+#include "Base.xcconfig"
 
-#include? "Signing.xcconfig"
+PRODUCT_BUNDLE_IDENTIFIER = $(TK_BASE_BUNDLE_ID)
+// 署名するときのプロファイル(Signing.xcconfig が決める。署名しないビルドでは空)
+PROVISIONING_PROFILE_SPECIFIER = $(TK_APP_PROFILE)

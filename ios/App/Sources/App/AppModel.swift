@@ -137,6 +137,8 @@ final class AppModel {
   /// 端末の DB。開けなかったときは記録を保存せずに動く
   let store: Store?
   let runner: SessionRunner
+  /// スマホ制限(裏機能。決定事項 D-24)
+  let restriction = RestrictionModel()
   /// 今日の学習日の合計(ホームに出す)
   private(set) var today: DayTotal?
   /// この 1 週間の学習日ごとの合計(古い順。最後が今日)
@@ -152,6 +154,17 @@ final class AppModel {
     // 前回、計測中にアプリが強制終了されていたら、それまでの記録を締める
     store?.recoverUnfinished()
     refreshToday()
+    // 前回、学習の途中でアプリが終わらされていたら、学習と連動した制限を外す
+    restriction.clearStaleStudy()
+    runner.onMoment = { [weak self] m in
+      guard let r = self?.restriction else { return }
+      switch m {
+      case .started: r.studyStarted()
+      case .breakStarted(let minutes, let nap): r.studyBreakStarted(minutes: minutes, nap: nap)
+      case .breakEnded: r.studyBreakEnded()
+      case .finished: r.studyFinished()
+      }
+    }
     // 検証モードは、最後の場面が終わると自分で終わる
     runner.onAutoFinish = { [weak self] in
       self?.recordScenarioProgress()

@@ -377,6 +377,10 @@ struct BreakScreen: View {
           Text(nap ? "仮眠中" : "休憩中").font(AppFont.bold(26, relativeTo: .title))
           Text(nap ? "スマホは置いたままで大丈夫。カメラは止めているよ" : "カメラは止めているよ")
             .font(AppFont.regular(14)).foregroundStyle(Palette.subInk)
+          if let note = model.restriction.studyNote {
+            Label(note, systemImage: "hourglass").font(AppFont.regular(13)).foregroundStyle(Palette.subInk)
+              .multilineTextAlignment(.center).padding(.top, 2)
+          }
         }
         .padding(.top, 32)
         TimelineView(.periodic(from: Date(), by: 1)) { ctx in

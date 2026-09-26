@@ -7,6 +7,7 @@ struct HomeView: View {
   @State private var customTimer = false
   @State private var showSettings = false
   @State private var showSubjectPicker = false
+  @State private var showRestriction = false
   /// 学習項目を選んだら、そのまま始める(初めての学習のとき)
   @State private var startAfterPick = false
 
@@ -50,6 +51,15 @@ struct HomeView: View {
             .font(AppFont.regular(13, relativeTo: .footnote))
             .foregroundStyle(Palette.subInk)
             .frame(maxWidth: .infinity)
+          // スマホ制限(裏機能。決定事項 D-24):ホームのいちばん下に小さく出す
+          Button {
+            showRestriction = true
+          } label: {
+            Label(model.restriction.homeStatus.map { "スマホ制限・\($0)" } ?? "スマホ制限", systemImage: "hourglass")
+              .font(AppFont.regular(13, relativeTo: .footnote))
+              .foregroundStyle(model.restriction.homeStatus == nil ? Palette.dimText : Palette.green)
+              .frame(maxWidth: .infinity, minHeight: 44)
+          }
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 24)
@@ -57,6 +67,7 @@ struct HomeView: View {
     }
     .foregroundStyle(Palette.ink)
     .sheet(isPresented: $showSettings) { SettingsSheet() }
+    .sheet(isPresented: $showRestriction) { RestrictionView() }
     .sheet(
       isPresented: $showSubjectPicker,
       onDismiss: {

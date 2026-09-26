@@ -10,7 +10,11 @@ Mac を持っていなくても GitHub Actions だけで署名できるように
 
 使い方:
   asc_signing.py create --bundle-id com.example.app --out DIR   # DIR に distribution.p12・p12-password・プロファイルを書く
+      [--extensions ShieldConfiguration,ShieldAction,Monitor]   # スマホ制限の拡張(Bundle ID はアプリの後ろにつける)も署名する
   asc_signing.py self-test                                       # 鍵を使わずに、作り方だけを確かめる
+
+DIR には、Xcode の設定(profiles.xcconfig:TK_APP_PROFILE・TK_PROFILE_<拡張>)と、
+書き出しの設定に入れる Bundle ID とプロファイルの対応(export-profiles.json)も書く。
 """
 
 import argparse
@@ -20,6 +24,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import sys
 import time
@@ -199,12 +204,12 @@ def find_or_create_certificate(client, key):
     return item["id"], base64.b64decode(item["attributes"]["certificateContent"])
 
 
-def find_or_create_bundle_id(client, identifier):
+def find_or_create_bundle_id(client, identifier, name="TsukueLog"):
     q = urllib.parse.urlencode({"filter[identifier]": identifier, "limit": "200"})
     for item in client.call("GET", f"/bundleIds?{q}").get("data", []):
         if item["attributes"]["identifier"] == identifier:
             return item["id"]
-    body = {"data": {"type": "bundleIds", "attributes": {"identifier": identifier, "name": "TsukueLog", "platform": "IOS"}}}
+    body = {"data": {"type": "bundleIds", "attributes": {"identifier": identifier, "name": name, "platform": "IOS"}}}
     print(f"Bundle ID {identifier} を登録しました")
     return client.call("POST", "/bundleIds", body)["data"]["id"]
 
@@ -242,23 +247,41 @@ def output(name, value):
             f.write(f"{name}={value}\n")
 
 
-def create(client, key, bundle_identifier, out):
+def profile_var(suffix):
+    """拡張の名前から、プロファイルを渡す Xcode の設定の名前を作る(ShieldConfiguration → TK_PROFILE_SHIELD_CONFIGURATION)"""
+    return "TK_PROFILE_" + re.sub(r"(?<!^)(?=[A-Z])", "_", suffix).upper()
+
+
+def signing_targets(bundle_identifier, extensions):
+    """署名するもの(Bundle ID、Bundle ID の名前、プロファイルを渡す設定の名前)。アプリと、スマホ制限の拡張"""
+    targets = [(bundle_identifier, "TsukueLog", "TK_APP_PROFILE")]
+    for suffix in extensions:
+        targets.append((f"{bundle_identifier}.{suffix}", f"TsukueLog {suffix}", profile_var(suffix)))
+    return targets
+
+
+def create(client, key, bundle_identifier, extensions, out):
     os.makedirs(out, exist_ok=True)
     cert_id, cert_der = find_or_create_certificate(client, key)
-    bundle = find_or_create_bundle_id(client, bundle_identifier)
-    profile = find_or_create_profile(client, bundle, bundle_identifier, cert_id)
+    lines = []
+    export = {}
+    for identifier, name, var in signing_targets(bundle_identifier, extensions):
+        bundle = find_or_create_bundle_id(client, identifier, name)
+        attrs = find_or_create_profile(client, bundle, identifier, cert_id)["attributes"]
+        with open(os.path.join(out, f"{attrs['uuid']}.mobileprovision"), "wb") as f:
+            f.write(base64.b64decode(attrs["profileContent"]))
+        lines.append(f"{var} = {attrs['name']}")
+        export[identifier] = attrs["name"]
     password = secrets.token_urlsafe(24)
     with open(os.path.join(out, "distribution.p12"), "wb") as f:
         f.write(make_p12(key, cert_der, password))
     with open(os.path.join(out, "p12-password"), "w") as f:
         f.write(password)
-    attrs = profile["attributes"]
-    with open(os.path.join(out, f"{attrs['uuid']}.mobileprovision"), "wb") as f:
-        f.write(base64.b64decode(attrs["profileContent"]))
-    with open(os.path.join(out, "profile-name"), "w") as f:
-        f.write(attrs["name"])
-    output("profile_name", attrs["name"])
-    output("profile_uuid", attrs["uuid"])
+    with open(os.path.join(out, "profiles.xcconfig"), "w") as f:
+        f.write("\n".join(lines) + "\n")
+    with open(os.path.join(out, "export-profiles.json"), "w") as f:
+        json.dump(export, f, indent=2)
+    output("profile_name", export[bundle_identifier])
 
 
 # ---------------------------------------------------------------- 確かめ
@@ -299,6 +322,10 @@ def self_test():
     k2, c2, _ = pkcs12.load_key_and_certificates(p12, b"pw")
     assert c2 == cert and k2.private_numbers() == key.private_numbers()
     assert not_expiring("2099-01-01T00:00:00.000+00:00") and not not_expiring("2020-01-01T00:00:00.000+00:00")
+    assert profile_var("ShieldConfiguration") == "TK_PROFILE_SHIELD_CONFIGURATION"
+    assert profile_var("Monitor") == "TK_PROFILE_MONITOR"
+    t = signing_targets("jp.example.app", ["ShieldAction"])
+    assert t == [("jp.example.app", "TsukueLog", "TK_APP_PROFILE"), ("jp.example.app.ShieldAction", "TsukueLog ShieldAction", "TK_PROFILE_SHIELD_ACTION")]
     print(f"self-test OK ({time.time() - started:.1f} 秒)")
     return p12
 
@@ -308,6 +335,7 @@ def main():
     p.add_argument("command", choices=["create", "self-test"])
     p.add_argument("--bundle-id")
     p.add_argument("--out", default="signing")
+    p.add_argument("--extensions", default="", help="スマホ制限の拡張(カンマ区切り)")
     a = p.parse_args()
     if a.command == "self-test":
         self_test()
@@ -317,7 +345,8 @@ def main():
     with open(os.environ["ASC_KEY_PATH"], "rb") as f:
         pem = f.read()
     client = Client(os.environ["ASC_KEY_ID"], os.environ["ASC_ISSUER_ID"], pem)
-    create(client, derive_rsa_key(pem), a.bundle_id, a.out)
+    extensions = [e for e in a.extensions.split(",") if e]
+    create(client, derive_rsa_key(pem), a.bundle_id, extensions, a.out)
 
 
 if __name__ == "__main__":

@@ -52,6 +52,14 @@ final class SessionRunner {
   private(set) var exportURL: URL?
   /// 検証モードが自分で終わったとき(結果の画面に移る)
   var onAutoFinish: (() -> Void)?
+  /// スマホ制限(決定事項 D-24)に伝える、学習の区切り(自由な学習のときだけ)
+  enum Moment {
+    case started
+    case breakStarted(minutes: Int, nap: Bool)
+    case breakEnded
+    case finished
+  }
+  var onMoment: ((Moment) -> Void)?
   // 解析の速さ(書き出しに入れる)
   private var perfMs: [Double] = []
   private var perfFirstT: Double?
@@ -321,6 +329,7 @@ final class SessionRunner {
     let cues = session?.endBreak(at: Self.now()) ?? []
     phase = session?.phase
     camera?.start()
+    moment(.breakEnded)
     usage(wasNap ? "nap_end" : "break_end")
     persistProgress()
     handle(cues)
@@ -370,6 +379,7 @@ final class SessionRunner {
         ])
     }
     stopDevices()
+    moment(.finished)
     summary = result
     phase = .finished
     status = .idle
@@ -681,6 +691,7 @@ final class SessionRunner {
         say("目を閉じたときの記録ができませんでした。このまま始めます")
       case .started:
         createRecord()
+        moment(.started)
         usage("ritual_complete")
         if !silent { sound.gentle() }
         // 検証モードでは、すぐに場面の指示を読み上げる
@@ -710,6 +721,10 @@ final class SessionRunner {
   /// 消音モード(振動だけ)か
   private var silent: Bool { soundMode == .vibrate }
 
+  private func moment(_ m: Moment) {
+    if mode == .free { onMoment?(m) }
+  }
+
   /// 声で伝える(消音モードでは伝えない)
   private func say(_ text: String, interrupt: Bool = false) {
     if !silent { voice.say(text, interrupt: interrupt) }
@@ -726,6 +741,7 @@ final class SessionRunner {
   private func startBreakCountdown(minutes: Int, nap: Bool = false) {
     // 休憩中はカメラを止める(MVP の設計 3 章)
     camera?.stop()
+    moment(.breakStarted(minutes: minutes, nap: nap))
     sound.stopAlarm()
     vibrator.stopAlarm()
     usage(nap ? "nap_start" : "break_start")

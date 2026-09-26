@@ -30,6 +30,8 @@ struct RootView: View {
     // アプリを離れたら一時停止する(設計書 3.11)
     .onChange(of: scenePhase) { _, newPhase in
       if newPhase != .active { model.runner.pause(.leftApp) }
+      // スマホ制限:戻ってきたら、見張りと制限を設定に合わせる
+      if newPhase == .active { model.restriction.refresh() }
     }
   }
 }
