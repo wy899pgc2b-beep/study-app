@@ -9,6 +9,8 @@ final class SoundPlayer {
   private let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1)!
   private var alarmTimer: Timer?
   private var alarmVolume: Float = 0.2
+  /// 音量(0〜1。設定の「音量」。既定の 0.6 のとき、それぞれの音をもとの大きさで鳴らす)
+  var volume: Float = 0.6
 
   init() {
     engine.attach(player)
@@ -24,8 +26,15 @@ final class SoundPlayer {
     var next: Double
   }
 
-  func play(_ tones: [Tone]) {
-    guard let buffer = makeBuffer(tones) else { return }
+  /// alarm:居眠りのアラーム(起こすための音なので、設定の音量を下げても、もとの大きさより小さくしない)
+  func play(_ tones: [Tone], alarm: Bool = false) {
+    let gain = alarm ? Swift.max(1, volume / 0.6) : volume / 0.6
+    let scaled = tones.map { t -> Tone in
+      var t = t
+      t.volume = Swift.min(1, t.volume * gain)
+      return t
+    }
+    guard let buffer = makeBuffer(scaled) else { return }
     do {
       try AVAudioSession.sharedInstance().setActive(true)
       if !engine.isRunning { try engine.start() }
@@ -74,7 +83,7 @@ final class SoundPlayer {
   var alarmActive: Bool { alarmTimer != nil }
 
   private func ringAlarm() {
-    play([Tone(freq: 1320, sec: 0.25, volume: alarmVolume, next: 0.3), Tone(freq: 990, sec: 0.25, volume: alarmVolume, next: 0.25)])
+    play([Tone(freq: 1320, sec: 0.25, volume: alarmVolume, next: 0.3), Tone(freq: 990, sec: 0.25, volume: alarmVolume, next: 0.25)], alarm: true)
     // イヤホンでは耳のすぐそばで鳴るので、上げる上限を半分にする
     alarmVolume = Swift.min(AudioRoute.headphonesConnected ? 0.5 : 1, alarmVolume + 0.1)
   }

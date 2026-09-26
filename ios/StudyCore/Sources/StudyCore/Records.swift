@@ -95,6 +95,8 @@ public struct IntervalRow: Codable, Equatable, Sendable {
     case pausedTouch = "paused_touch"
     case pausedApp = "paused_app"
     case breakTime = "break"
+    /// 仮眠(決定事項 D-23。休憩の一つとして数える)
+    case nap
   }
 
   public var sessionId: UUID

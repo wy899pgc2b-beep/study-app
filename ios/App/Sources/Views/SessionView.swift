@@ -88,7 +88,7 @@ struct SessionView: View {
       if runner.mode == .scenario {
         ScenarioProgressView(position: runner.scenarioPosition, order: runner.scenarioOrder)
       } else {
-        StudyingLamp(startedAt: runner.studyStartedAt)
+        StudyingLamp(startedAt: runner.studyStartedAt, napHint: runner.napSuggested)
       }
     default:
       EmptyView()
@@ -181,6 +181,8 @@ struct RitualView: View {
 /// 学習中:黒い画面に、ランプの小さな灯りと経過時間を暗く出す(設計書 5.5 の 6)
 struct StudyingLamp: View {
   var startedAt: Date?
+  /// 仮眠を勧めているとき(決定事項 D-23)
+  var napHint = false
 
   var body: some View {
     ZStack {
@@ -201,6 +203,11 @@ struct StudyingLamp: View {
       }
       VStack {
         Spacer()
+        if napHint {
+          Text("眠気が続いているみたい。画面に触れると、20分の仮眠を選べるよ")
+            .font(AppFont.regular(15)).foregroundStyle(Color(hex: 0xB8B8B8)).multilineTextAlignment(.center)
+            .padding(.bottom, 12)
+        }
         Text("画面に触れると一時停止します").font(AppFont.regular(13)).foregroundStyle(Palette.dimText)
       }
     }
@@ -313,6 +320,9 @@ struct PausedScreen: View {
           }
           .card()
         }
+        if runner.napSuggested {
+          NapSuggestionCard()
+        }
         if runner.pausedLong {
           Text("一時停止から10分たったよ。今日はここまでにする?")
             .font(AppFont.medium(16))
@@ -349,27 +359,37 @@ struct BreakScreen: View {
     ("wind", "深呼吸を 3 回しよう", "次の時間に向けて、気持ちを切り替えよう"),
   ]
 
+  /// 仮眠のときのヒント(決定事項 D-23)
+  static let napTips: [(icon: String, title: String, detail: String)] = [
+    ("bed.double", "机に伏せるか、椅子にもたれて目を閉じよう", "横にならない方が、深く眠りすぎずに起きやすいよ"),
+    ("alarm", "20 分たったら起こすよ", "それより長く眠ると、起きたあとにぼんやりしやすいんだ"),
+    ("drop", "起きたら水を飲んで、体を少し動かそう", "頭がすっきりして、机に戻りやすくなるよ"),
+  ]
+
   var body: some View {
     let runner = model.runner
+    let nap = runner.onNap
+    let tips = nap ? Self.napTips : Self.tips
     ZStack {
       Palette.breakBackground.ignoresSafeArea()
       VStack(spacing: 20) {
         VStack(spacing: 4) {
-          Text("休憩中").font(AppFont.bold(26, relativeTo: .title))
-          Text("カメラは止めているよ").font(AppFont.regular(14)).foregroundStyle(Palette.subInk)
+          Text(nap ? "仮眠中" : "休憩中").font(AppFont.bold(26, relativeTo: .title))
+          Text(nap ? "スマホは置いたままで大丈夫。カメラは止めているよ" : "カメラは止めているよ")
+            .font(AppFont.regular(14)).foregroundStyle(Palette.subInk)
         }
         .padding(.top, 32)
         TimelineView(.periodic(from: Date(), by: 1)) { ctx in
           let remaining = Swift.max(0, runner.breakEndsAt.map { $0.timeIntervalSince(ctx.date) } ?? 0)
           let total = Swift.max(1, runner.breakTotalSec)
-          let tip = Self.tips[Int(ctx.date.timeIntervalSinceReferenceDate / 20) % Self.tips.count]
+          let tip = tips[Int(ctx.date.timeIntervalSinceReferenceDate / 20) % tips.count]
           VStack(spacing: 20) {
             ZStack {
               RingView(progress: remaining / total, lineWidth: 16, color: Palette.focus, track: Palette.breakTrack)
               VStack(spacing: 2) {
                 Text(String(format: "%d:%02d", Int(remaining) / 60, Int(remaining) % 60))
                   .font(AppFont.bold(46).monospacedDigit())
-                Text(remaining > 0 ? "のこり" : "休憩おわり").font(AppFont.regular(15)).foregroundStyle(Palette.subInk)
+                Text(remaining > 0 ? "のこり" : (nap ? "起きる時間だよ" : "休憩おわり")).font(AppFont.regular(15)).foregroundStyle(Palette.subInk)
               }
             }
             .frame(width: 230, height: 230)
@@ -384,7 +404,7 @@ struct BreakScreen: View {
           }
         }
         Spacer()
-        Button("休憩を終えて机に戻る") { runner.endBreak() }
+        Button(nap ? "仮眠を終えて机に戻る" : "休憩を終えて机に戻る") { runner.endBreak() }
           .buttonStyle(PrimaryButtonStyle(height: 72, fontSize: 22))
         Button("今日はここまでにする") { model.finish() }
           .font(AppFont.regular(16))
@@ -395,5 +415,29 @@ struct BreakScreen: View {
       .padding(.bottom, 24)
     }
     .foregroundStyle(Palette.ink)
+  }
+}
+
+/// 一時停止の画面に出す、仮眠のすすめ(決定事項 D-23)
+struct NapSuggestionCard: View {
+  @Environment(AppModel.self) private var model
+
+  var body: some View {
+    let hour = Calendar.current.component(.hour, from: Date())
+    let lateNight = hour >= 23 || hour < 5
+    VStack(alignment: .leading, spacing: 12) {
+      Label("眠気が何度も来ているみたい", systemImage: "moon.zzz").font(AppFont.bold(17))
+      Text(
+        lateNight
+          ? "20分ほど仮眠すると、頭がすっきりするよ。夜遅い時間なので、今日はここまでにしてしっかり眠るのもいいね"
+          : "20分ほど仮眠すると、頭がすっきりするよ。起きる時間になったら起こすね"
+      )
+      .font(AppFont.regular(15)).fixedSize(horizontal: false, vertical: true)
+      Button("20分仮眠する") { model.runner.startNap() }
+        .buttonStyle(PrimaryButtonStyle(height: 56, fontSize: 19))
+    }
+    .padding(16)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(Palette.sticky, in: RoundedRectangle(cornerRadius: 8))
   }
 }

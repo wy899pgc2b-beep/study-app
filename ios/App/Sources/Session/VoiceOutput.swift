@@ -5,6 +5,8 @@ import AVFoundation
 @MainActor
 final class VoiceOutput {
   private let synth = AVSpeechSynthesizer()
+  /// 音量(0〜1。設定の「音量」)
+  var volume: Float = 0.6
 
   init() {
     try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
@@ -17,6 +19,7 @@ final class VoiceOutput {
     let u = AVSpeechUtterance(string: text)
     u.voice = AVSpeechSynthesisVoice(language: "ja-JP")
     u.rate = AVSpeechUtteranceDefaultSpeechRate
+    u.volume = volume
     synth.speak(u)
   }
 

@@ -230,29 +230,54 @@ struct SettingsSheet: View {
   @State private var exportFailed = false
   @State private var askScenarioRange = false
 
+  // 設定画面は、よく使う「基本」の項目を先に出し、ほかは「詳細設定」にまとめる(設計書の付録 A)
   var body: some View {
     NavigationStack {
       Form {
         Section("置き方") {
-          Picker("置き方", selection: binding(\.setup)) {
+          Picker("置き方", selection: model.settingBinding(\.setup)) {
             Text("横向きに立てかける").tag(SetupStyle.landscape)
             Text("正面に立てる").tag(SetupStyle.stand)
           }
           .pickerStyle(.segmented)
-          Toggle("置く前の説明を省く", isOn: binding(\.skipPlacementIntro)).tint(Palette.green)
         }
         Section {
-          Stepper(value: binding(\.eyeDeskCm), in: 20...60, step: 1) {
-            Text("目と教材の距離 \(Int(model.settings.eyeDeskCm)) cm")
+          Picker("案内のしかた", selection: model.settingBinding(\.soundMode)) {
+            ForEach(SoundMode.allCases, id: \.self) { Text($0.label).tag($0) }
           }
+          .pickerStyle(.segmented)
+          HStack {
+            Image(systemName: "speaker.wave.1").foregroundStyle(Palette.subInk).accessibilityHidden(true)
+            Slider(value: model.settingBinding(\.volume), in: 0...1, step: 0.05)
+              .tint(Palette.green)
+              .accessibilityLabel("音量")
+              .accessibilityValue("\(Int((model.settings.volume * 100).rounded()))")
+            Text("\(Int((model.settings.volume * 100).rounded()))").monospacedDigit().frame(width: 36, alignment: .trailing)
+          }
+        } header: {
+          Text("案内と音")
         } footer: {
-          Text("ふだんの距離より近づいたときに、声で知らせます")
+          Text("居眠りのアラームは起こすための音なので、音量を下げても、ある程度の大きさで鳴ります")
+        }
+        Section {
+          Picker("居眠りのとき", selection: model.settingBinding(\.sleepAlarm)) {
+            Text("アラームで起こす").tag(true)
+            Text("記録だけ").tag(false)
+          }
+          Toggle("眠気が続くときに、仮眠を勧める", isOn: model.settingBinding(\.napSuggest)).tint(Palette.green)
+        } header: {
+          Text("居眠り")
+        } footer: {
+          Text("うとうと・居眠りが 20 分のうちに 3 回あったら、20 分ほどの仮眠を勧めます。仮眠の終わりには起こします")
         }
         Section("学年") {
-          Picker("学年", selection: binding(\.grade)) {
+          Picker("学年", selection: model.settingBinding(\.grade)) {
             Text("選ばない").tag(Grade?.none)
             ForEach(Grade.allCases) { Text($0.label).tag(Grade?.some($0)) }
           }
+        }
+        Section {
+          NavigationLink("詳細設定") { DetailSettingsView() }
         }
         Section {
           if let url = exportURL {
@@ -301,11 +326,57 @@ struct SettingsSheet: View {
       .toolbar { Button("閉じる") { dismiss() } }
     }
   }
+}
 
-  private func binding<V>(_ path: WritableKeyPath<StudySettings, V>) -> Binding<V> {
+/// 詳細設定(設計書の付録 A)。判定の細かい値は、既定では技術検証で決めた値のまま
+struct DetailSettingsView: View {
+  @Environment(AppModel.self) private var model
+
+  var body: some View {
+    Form {
+      Section("置く前") {
+        Toggle("置く前の説明を省く", isOn: model.settingBinding(\.skipPlacementIntro)).tint(Palette.green)
+      }
+      Section {
+        Stepper(value: model.settingBinding(\.eyeDeskCm), in: 20...60, step: 1) {
+          Text("目と教材の距離 \(Int(model.settings.eyeDeskCm)) cm")
+        }
+        Stepper(value: closePercent, in: 15...40, step: 5) {
+          Text("「近すぎ」と判定する近づき方 \(closePercent.wrappedValue)%")
+        }
+      } header: {
+        Text("姿勢")
+      } footer: {
+        Text("ふだんの距離より、この割合以上近づいた状態が 20 秒続くと、声で知らせます(既定は 25%)")
+      }
+      Section {
+        Stepper(value: model.settingBinding(\.awaySec), in: 10...60, step: 5) {
+          Text("離席と判定するまで \(Int(model.settings.awaySec)) 秒")
+        }
+      } header: {
+        Text("離席")
+      } footer: {
+        Text("カメラに映らない時間がこの長さになったら、離席として記録します(既定は 20 秒)。検証モードでは、いつも既定の値で判定します")
+      }
+    }
+    .navigationTitle("詳細設定")
+  }
+
+  /// 「近すぎ」の割合を、% の整数で扱う
+  private var closePercent: Binding<Int> {
     Binding(
-      get: { model.settings[keyPath: path] },
-      set: { value in model.update { $0[keyPath: path] = value } }
+      get: { Int((model.settings.closeRatio * 100).rounded()) },
+      set: { v in model.update { $0.closeRatio = Double(v) / 100 } }
+    )
+  }
+}
+
+extension AppModel {
+  /// 設定の 1 項目を、画面の部品につなぐ
+  func settingBinding<V>(_ path: WritableKeyPath<StudySettings, V>) -> Binding<V> {
+    Binding(
+      get: { self.settings[keyPath: path] },
+      set: { value in self.update { $0[keyPath: path] = value } }
     )
   }
 }

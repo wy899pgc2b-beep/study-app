@@ -68,6 +68,15 @@ struct StudySettings: Codable, Equatable {
   /// 学習項目(前回選んだもの。次の学習に引き継ぐ)と、自分で足した項目
   var subject: String?
   var customSubjects: [String] = []
+  /// 居眠りのとき:アラームで起こす(true)/記録だけ(false)。設計書 3.8 の要件 3
+  var sleepAlarm = true
+  /// 音量(0〜1)
+  var volume: Double = 0.6
+  /// 離席と判定するまでの時間(秒。10〜60)と、「近すぎ」と判定する近づき方(0.15〜0.4)。設計書の付録 A
+  var awaySec: Double = 20
+  var closeRatio: Double = 0.25
+  /// 居眠りが何度も来るときに、仮眠を勧める(決定事項 D-23)
+  var napSuggest = true
 
   init() {}
 
@@ -87,6 +96,11 @@ struct StudySettings: Codable, Equatable {
     scenarioInvited = try c.decodeIfPresent(Bool.self, forKey: .scenarioInvited) ?? false
     subject = try c.decodeIfPresent(String.self, forKey: .subject)
     customSubjects = try c.decodeIfPresent([String].self, forKey: .customSubjects) ?? []
+    sleepAlarm = try c.decodeIfPresent(Bool.self, forKey: .sleepAlarm) ?? true
+    volume = try c.decodeIfPresent(Double.self, forKey: .volume) ?? 0.6
+    awaySec = try c.decodeIfPresent(Double.self, forKey: .awaySec) ?? 20
+    closeRatio = try c.decodeIfPresent(Double.self, forKey: .closeRatio) ?? 0.25
+    napSuggest = try c.decodeIfPresent(Bool.self, forKey: .napSuggest) ?? true
   }
 
   private static let key = "studySettings"

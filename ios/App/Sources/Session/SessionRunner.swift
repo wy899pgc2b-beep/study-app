@@ -68,6 +68,14 @@ final class SessionRunner {
   private var lastNudgeT: Double?
   /// この学習の学習項目
   private(set) var subject: String?
+  /// 仮眠のすすめ(決定事項 D-23)。勧めているあいだ true。仮眠中は onNap
+  private(set) var napSuggested = false
+  private(set) var onNap = false
+  private var napAdvisor = NapAdvisor()
+  private var napSuggestEnabled = true
+  /// 居眠りのとき:アラームで起こすか(false なら記録だけ)
+  private var sleepAlarm = true
+  private var wakeAlarmTimer: Timer?
   // 熱と電池(MVP の設計 5 章「端末の制御」)
   private var baseFps = 5.0
   private var thermal: ThermalLevel = .nominal
@@ -133,6 +141,13 @@ final class SessionRunner {
     scenarioRemaining = []
     soundMode = mode == .scenario ? .voice : settings.soundMode
     subject = mode == .scenario ? nil : settings.subject
+    sleepAlarm = settings.sleepAlarm
+    napSuggestEnabled = settings.napSuggest && mode == .free
+    napAdvisor = NapAdvisor()
+    napSuggested = false
+    onNap = false
+    voice.volume = Float(settings.volume)
+    sound.volume = Float(settings.volume)
     lastNudgeT = nil
     scenarioPosition = nil
     scenarioResults = nil
@@ -156,7 +171,8 @@ final class SessionRunner {
       let vision = try await Task.detached(priority: .userInitiated) { try VisionEngine() }.value
       let camera = CameraSource()
       try camera.configure()
-      let cfg = AnalysisConfig()
+      // 利用者の設定(離席と判定するまでの時間、近すぎと判定する近づき方)。検証モードは試作品と同じ値のまま
+      let cfg = mode == .scenario ? AnalysisConfig() : AnalysisConfig().tuned(awaySec: settings.awaySec, closeRatio: settings.closeRatio)
       baseFps = cfg.analysisFps
       thermal = Self.thermalLevel()
       thermalMax = thermal
@@ -250,6 +266,10 @@ final class SessionRunner {
 
   func resume() {
     guard session?.isPaused == true else { return }
+    if napSuggested {
+      napSuggested = false
+      usage("nap_declined")
+    }
     if mode == .scenario {
       // 途中まで行った場面は、指示からやり直す(飛ばしたときは、次の場面の指示から始まる)
       scenario?.restartCurrent()
@@ -276,14 +296,32 @@ final class SessionRunner {
     resume()
   }
 
+  /// 仮眠をとる(決定事項 D-23)。一時停止の画面から選ぶ。20 分たったら起こす
+  func startNap() {
+    guard session?.isPaused == true else { return }
+    session?.startBreak(at: Self.now(), minutes: NapAdvisor.napMinutes, nap: true)
+    napSuggested = false
+    onNap = true
+    napAdvisor.napTaken()
+    clearPause()
+    phase = session?.phase
+    startBreakCountdown(minutes: NapAdvisor.napMinutes, nap: true)
+  }
+
   func endBreak() {
     breakTimer?.invalidate()
     breakTimer = nil
     breakEndsAt = nil
+    wakeAlarmTimer?.invalidate()
+    wakeAlarmTimer = nil
+    sound.stopAlarm()
+    vibrator.stopAlarm()
+    let wasNap = onNap
+    onNap = false
     let cues = session?.endBreak(at: Self.now()) ?? []
     phase = session?.phase
     camera?.start()
-    usage("break_end")
+    usage(wasNap ? "nap_end" : "break_end")
     persistProgress()
     handle(cues)
   }
@@ -416,6 +454,10 @@ final class SessionRunner {
 
   private func stopDevices() {
     stopPowerWatch()
+    wakeAlarmTimer?.invalidate()
+    wakeAlarmTimer = nil
+    napSuggested = false
+    onNap = false
     clearPause()
     breakTimer?.invalidate()
     breakTimer = nil
@@ -649,7 +691,9 @@ final class SessionRunner {
       case .breakDue:
         startBreakCountdown(minutes: session?.currentBreakMin ?? 5)
       case .breakOver:
-        if silent {
+        if onNap {
+          wakeFromNap()
+        } else if silent {
           vibrator.pulse(3)
         } else {
           sound.gentle()
@@ -679,17 +723,17 @@ final class SessionRunner {
     vibrator.long()
   }
 
-  private func startBreakCountdown(minutes: Int) {
+  private func startBreakCountdown(minutes: Int, nap: Bool = false) {
     // 休憩中はカメラを止める(MVP の設計 3 章)
     camera?.stop()
     sound.stopAlarm()
     vibrator.stopAlarm()
-    usage("break_start")
+    usage(nap ? "nap_start" : "break_start")
     if silent {
       vibrator.pulse(3)
     } else {
       sound.gentle()
-      voice.say("休憩の時間です。\(minutes)分休みましょう", interrupt: true)
+      voice.say(nap ? "おやすみなさい。\(minutes)分たったら起こします" : "休憩の時間です。\(minutes)分休みましょう", interrupt: true)
     }
     breakEndsAt = Date().addingTimeInterval(Double(minutes) * 60)
     breakTotalSec = Double(minutes) * 60
@@ -702,12 +746,45 @@ final class SessionRunner {
     }
   }
 
+  /// 居眠りが何度も来ているので、仮眠を勧める(決定事項 D-23)。画面に触れると、一時停止の画面で仮眠を選べる
+  private func suggestNap() {
+    napSuggested = true
+    usage("nap_suggested")
+    if silent {
+      vibrator.pulse(2, sec: 0.9, gap: 0.4)
+    } else {
+      voice.say("眠気が何度も来ているようです。20分ほど仮眠をとると、すっきりしますよ。画面に触れると、仮眠を選べます", interrupt: true)
+    }
+  }
+
+  /// 仮眠の終わり:起こす(アラームは「仮眠を終える」を押すか、3 分たったら止める)
+  private func wakeFromNap() {
+    usage("nap_wake_alarm")
+    if silent {
+      vibrator.startAlarm()
+    } else {
+      voice.say("20分たちました。起きましょう。水を飲んで、体を少し動かしてから戻りましょう", interrupt: true)
+      sound.startAlarm()
+    }
+    wakeAlarmTimer?.invalidate()
+    wakeAlarmTimer = Timer.scheduledTimer(withTimeInterval: 180, repeats: false) { [weak self] _ in
+      Task { @MainActor in
+        self?.sound.stopAlarm()
+        self?.vibrator.stopAlarm()
+      }
+    }
+  }
+
   /// 判定の出来事を音で知らせる(設計書 3.13、試作品の app.js の notify と同じ)。
   /// 検証モードでは、場面の指示と重ならないよう読み上げない(居眠りの音と注意音は鳴らす)。消音モードでは振動だけ
   private func notify(_ ev: AnalysisEvent) {
     let quiet = mode == .scenario
+    let suggest = napSuggestEnabled && !napSuggested && napAdvisor.observe(ev)
+    defer { if suggest { suggestNap() } }
     switch ev.type {
     case .sleep:
+      // 「記録だけ」の設定ではアラームを鳴らさない(検証モードでは、試作品と同じように鳴らす)
+      guard sleepAlarm || mode == .scenario else { break }
       if silent { vibrator.startAlarm() } else { sound.startAlarm() }
     case .wake:
       sound.stopAlarm()
