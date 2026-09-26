@@ -33,3 +33,7 @@ ios/App/Config/Signing.xcconfig
 *.p12
 *.mobileprovision
 *.cer
+
+# Python
+__pycache__/
+*.pyc
