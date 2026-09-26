@@ -23,6 +23,7 @@ struct RootView: View {
       case .placement: PlacementView()
       case .session: SessionView()
       case .result: ResultView()
+      case .onboarding: OnboardingView()
       }
     }
     // アプリを離れたら一時停止する(設計書 3.11)

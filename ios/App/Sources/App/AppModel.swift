@@ -2,6 +2,35 @@ import Foundation
 import Observation
 import StudyCore
 
+/// 学年(オンボーディングで選ぶ。MVP の設計 S-01)
+enum Grade: String, Codable, CaseIterable, Identifiable {
+  case junior1, junior2, junior3, high1, high2, high3, graduate, university, other
+
+  var id: String { rawValue }
+
+  var label: String {
+    switch self {
+    case .junior1: "中1"
+    case .junior2: "中2"
+    case .junior3: "中3"
+    case .high1: "高1"
+    case .high2: "高2"
+    case .high3: "高3"
+    case .graduate: "既卒"
+    case .university: "大学生"
+    case .other: "その他"
+    }
+  }
+
+  /// 保護者の同意を確かめる学年(中学生以下)
+  var needsParentalConsent: Bool {
+    switch self {
+    case .junior1, .junior2, .junior3: true
+    default: false
+    }
+  }
+}
+
 /// 学習の前に決めておく設定(設計書 3.24、決定事項 D-9)。端末に覚えておく。
 struct StudySettings: Codable, Equatable {
   var breakTimer = BreakTimer()
@@ -10,6 +39,13 @@ struct StudySettings: Codable, Equatable {
   var eyeDeskCm: Double = 35
   /// 置く前の説明(置き方の絵)を省く(設計書 5.5)
   var skipPlacementIntro = false
+  /// オンボーディング(同意・学年・カメラの許可)を終えた
+  var onboarded = false
+  var grade: Grade?
+  /// 保護者の同意を得たと本人が確かめた(中学生以下)
+  var parentalConsent = false
+  /// 映像の扱いに同意した日時
+  var consentedAt: Date?
 
   init() {}
 
@@ -20,6 +56,10 @@ struct StudySettings: Codable, Equatable {
     setup = try c.decodeIfPresent(SetupStyle.self, forKey: .setup) ?? .landscape
     eyeDeskCm = try c.decodeIfPresent(Double.self, forKey: .eyeDeskCm) ?? 35
     skipPlacementIntro = try c.decodeIfPresent(Bool.self, forKey: .skipPlacementIntro) ?? false
+    onboarded = try c.decodeIfPresent(Bool.self, forKey: .onboarded) ?? false
+    grade = try? c.decodeIfPresent(Grade.self, forKey: .grade)
+    parentalConsent = try c.decodeIfPresent(Bool.self, forKey: .parentalConsent) ?? false
+    consentedAt = try c.decodeIfPresent(Date.self, forKey: .consentedAt)
   }
 
   private static let key = "studySettings"
@@ -37,6 +77,8 @@ struct StudySettings: Codable, Equatable {
 }
 
 enum Screen: Equatable {
+  /// 初回だけ(同意・学年・カメラの許可)
+  case onboarding
   case home
   /// 置く前の説明(置き方の絵)
   case placement
@@ -63,9 +105,24 @@ final class AppModel {
     let store = try? Store()
     self.store = store
     runner = SessionRunner(store: store)
+    if !settings.onboarded { screen = .onboarding }
     // 前回、計測中にアプリが強制終了されていたら、それまでの記録を締める
     store?.recoverUnfinished()
     refreshToday()
+    // 検証モードは、最後の場面が終わると自分で終わる
+    runner.onAutoFinish = { [weak self] in self?.screen = .result }
+  }
+
+  /// 利用状況の記録(F-27。端末内だけ)
+  func usage(_ name: String, _ properties: [String: String] = [:]) {
+    store?.log(UsageEvent(name: name, at: Date(), properties: properties))
+  }
+
+  /// オンボーディングを終えてホームへ
+  func completeOnboarding() {
+    update { $0.onboarded = true }
+    usage("onboarding_complete", ["grade": settings.grade?.rawValue ?? ""])
+    screen = .home
   }
 
   func refreshToday() {
@@ -99,6 +156,19 @@ final class AppModel {
   func start() {
     screen = .session
     Task { await runner.start(settings: settings) }
+  }
+
+  /// 検証モード:検証シナリオの 9 場面を行い、場面ごとの合否を出して記録を書き出す(MVP の設計 5 章 4)
+  func startScenario() {
+    screen = .session
+    Task { await runner.start(settings: settings, mode: .scenario) }
+  }
+
+  /// 設定の「記録を書き出す」
+  func exportRecords() -> URL? {
+    let url = store?.exportAll(appVersion: SessionRunner.appVersion, grade: settings.grade?.rawValue)
+    if url != nil { usage("records_export") }
+    return url
   }
 
   func finish() {

@@ -150,6 +150,8 @@ struct HomeView: View {
 struct SettingsSheet: View {
   @Environment(AppModel.self) private var model
   @Environment(\.dismiss) private var dismiss
+  @State private var exportURL: URL?
+  @State private var exportFailed = false
 
   var body: some View {
     NavigationStack {
@@ -168,6 +170,38 @@ struct SettingsSheet: View {
           }
         } footer: {
           Text("ふだんの距離より近づいたときに、声で知らせます")
+        }
+        Section("学年") {
+          Picker("学年", selection: binding(\.grade)) {
+            Text("選ばない").tag(Grade?.none)
+            ForEach(Grade.allCases) { Text($0.label).tag(Grade?.some($0)) }
+          }
+        }
+        Section {
+          if let url = exportURL {
+            ShareLink(item: url) { Label("書き出した記録を送る", systemImage: "square.and.arrow.up") }
+          } else {
+            Button {
+              exportURL = model.exportRecords()
+              exportFailed = exportURL == nil
+            } label: {
+              Label("記録を書き出す", systemImage: "doc.text")
+            }
+          }
+          Button {
+            dismiss()
+            model.startScenario()
+          } label: {
+            Label("検証モードを始める", systemImage: "checklist")
+          }
+        } header: {
+          Text("記録と検証")
+        } footer: {
+          Text(
+            exportFailed
+              ? "記録を書き出せませんでした"
+              : "書き出す記録は、学習の時間・回数・集中度だけです。映像・画像・顔の特徴点は含まれません。検証モードは、声の指示に合わせて 9 つの場面(約 5 分)を行い、判定が合っているかを確かめます。学習の記録には入りません"
+          )
         }
       }
       .navigationTitle("設定")

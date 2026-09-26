@@ -13,7 +13,9 @@ struct ResultView: View {
       ScrollView {
         VStack(alignment: .leading, spacing: 18) {
           Text("\(Wording.day(runner.record?.startedAt ?? Date()))の記録").font(AppFont.regular(14)).foregroundStyle(Palette.subInk)
-          if let s = runner.summary, let card = runner.card {
+          if let results = runner.scenarioResults {
+            scenarioCard(results)
+          } else if let s = runner.summary, let card = runner.card {
             mainCard(card)
             waveCard(s)
             chips(s)
@@ -26,6 +28,15 @@ struct ResultView: View {
           }
           Button("ホームに戻る") { model.backHome() }
             .buttonStyle(PrimaryButtonStyle(height: 64, fontSize: 21))
+          if let url = runner.exportURL {
+            // 判定を確かめるための書き出し(映像・画像・特徴点は含まない)。本人が選んだ相手にだけ送られる
+            ShareLink(item: url) {
+              Label(runner.mode == .scenario ? "検証の記録を書き出す" : "この回の記録を書き出す", systemImage: "square.and.arrow.up")
+                .font(AppFont.regular(15))
+                .frame(maxWidth: .infinity, minHeight: 44)
+            }
+            .foregroundStyle(Palette.green)
+          }
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 24)
@@ -143,6 +154,58 @@ struct ResultView: View {
           .card(padding: 14)
       }
     }
+  }
+
+  /// 検証モードの結果:場面ごとの合否(MVP の完了の条件 2:9 場面のうち 8 場面以上)
+  private func scenarioCard(_ results: [PhaseResult]) -> some View {
+    let judged = results.filter { $0.pass != nil }
+    let passed = judged.filter { $0.pass == true }.count
+    return VStack(alignment: .leading, spacing: 14) {
+      VStack(alignment: .leading, spacing: 4) {
+        Text("検証モードの結果").font(AppFont.regular(14)).foregroundStyle(Palette.subInk)
+        Text("\(judged.count) 場面のうち \(passed) 場面が合格").font(AppFont.bold(24, relativeTo: .title))
+        Text("目安は 9 場面のうち 8 場面以上です。この結果は学習の記録には入りません")
+          .font(AppFont.regular(13)).foregroundStyle(Palette.subInk).fixedSize(horizontal: false, vertical: true)
+      }
+      VStack(spacing: 0) {
+        ForEach(Array(results.enumerated()), id: \.offset) { i, r in
+          scenarioRow(i, r)
+          if i < results.count - 1 { Divider().overlay(Palette.line) }
+        }
+      }
+    }
+    .card()
+  }
+
+  private func scenarioRow(_ index: Int, _ r: PhaseResult) -> some View {
+    let text: String
+    let icon: String
+    let color: Color
+    if r.pass == true {
+      (text, icon, color) = ("合格", "checkmark.circle.fill", Palette.green)
+    } else if r.pass == false {
+      (text, icon, color) = ("不合格", "xmark.circle", Palette.lampText)
+    } else {
+      (text, icon, color) = ("対象外", "minus.circle", Palette.dimText)
+    }
+    // 期待した状態(または検出)の割合と、試作品と同じ注記
+    var parts: [String] = []
+    if let score = r.score { parts.append("\(r.flagLabel ?? "期待した状態") \(Int((score * 100).rounded()))%") }
+    parts += r.notes
+    let detail = parts.joined(separator: "・")
+    return HStack(alignment: .firstTextBaseline, spacing: 10) {
+      Text("\(index + 1)").font(AppFont.bold(15)).foregroundStyle(Palette.subInk).frame(width: 18)
+      VStack(alignment: .leading, spacing: 2) {
+        Text(r.label).font(AppFont.medium(16))
+        if !detail.isEmpty {
+          Text(detail).font(AppFont.regular(12)).foregroundStyle(Palette.subInk).fixedSize(horizontal: false, vertical: true)
+        }
+      }
+      Spacer()
+      Label(text, systemImage: icon).font(AppFont.bold(14)).foregroundStyle(color)
+    }
+    .padding(.vertical, 10)
+    .accessibilityElement(children: .combine)
   }
 
   private func label(_ r: SelfRating) -> String {

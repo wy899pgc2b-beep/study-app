@@ -2,6 +2,13 @@ import Foundation
 import Observation
 import QuartzCore
 import StudyCore
+import UIKit
+
+/// 学習のしかた:ふだんの学習か、検証モード(検証シナリオの 9 場面)か
+enum SessionMode: String {
+  case free
+  case scenario
+}
 
 /// 1 回の学習を動かす:カメラ → 端末内 AI → 特徴量 → StudySession(位置合わせ・判定・集計)→ 画面と音。
 /// 解析はカメラのフレームの列で行い、StudySession と画面の状態はメインスレッドで持つ。
@@ -13,6 +20,8 @@ final class SessionRunner {
     case preparing
     case running
     case failed(String)
+    /// カメラの使用が許可されていない(設定アプリを開くボタンを出す)
+    case cameraDenied
   }
 
   private(set) var status: Status = .idle
@@ -33,6 +42,22 @@ final class SessionRunner {
   /// 一時停止のまま 10 分たった(終了するかを尋ねる。設計書 3.11 の要件 8)
   private(set) var pausedLong = false
   private var pauseTimer: Timer?
+  /// 検証モードの進み具合と、終わったときの採点
+  private(set) var mode: SessionMode = .free
+  private var scenario: ScenarioRun?
+  private(set) var scenarioPosition: Scenario.Position?
+  private(set) var scenarioResults: [PhaseResult]?
+  private var lastScenarioT: Double?
+  /// 書き出した記録(結果の画面から送れる)
+  private(set) var exportURL: URL?
+  /// 検証モードが自分で終わったとき(結果の画面に移る)
+  var onAutoFinish: (() -> Void)?
+  // 解析の速さ(書き出しに入れる)
+  private var perfMs: [Double] = []
+  private var perfFirstT: Double?
+  private var perfLastT: Double?
+  private var videoSize: String?
+  private var fovDeg: Double?
 
   struct DebugInfo: Equatable {
     var fps = 0.0
@@ -72,7 +97,7 @@ final class SessionRunner {
   /// 解析の時刻(ミリ秒)を、壁時計の時刻にする
   private func wall(_ t: Double) -> Date { wallStart.addingTimeInterval((t - tStart) / 1000) }
 
-  func start(settings: StudySettings) async {
+  func start(settings: StudySettings, mode: SessionMode = .free) async {
     guard status == .idle || isFailed else { return }
     status = .preparing
     summary = nil
@@ -80,8 +105,18 @@ final class SessionRunner {
     record = nil
     savedMinutes = 0
     savedIntervals = 0
+    self.mode = mode
+    scenario = mode == .scenario ? ScenarioRun(setup: settings.setup) : nil
+    scenarioPosition = nil
+    scenarioResults = nil
+    lastScenarioT = nil
+    exportURL = nil
+    perfMs = []
+    perfFirstT = nil
+    perfLastT = nil
     guard await CameraSource.requestAccess() else {
-      status = .failed("カメラの使用が許可されていません。設定アプリで許可すると、判定を使えます")
+      status = .cameraDenied
+      usage("camera_denied_shown")
       return
     }
     do {
@@ -102,8 +137,13 @@ final class SessionRunner {
       }
       self.camera = camera
       self.pipeline = pipeline
+      videoSize = camera.dimensions.map { "\($0.width)×\($0.height)" }
+      fovDeg = camera.fovLongSideDeg
+      // 検証モードでは休憩タイマーを使わない
+      var timer = settings.breakTimer
+      if mode == .scenario { timer.enabled = false }
       var s = StudySession(
-        cfg: cfg, setup: settings.setup, autoAway: true, measuredEyeDeskCm: settings.eyeDeskCm, breakTimer: settings.breakTimer)
+        cfg: cfg, setup: settings.setup, autoAway: true, measuredEyeDeskCm: settings.eyeDeskCm, breakTimer: timer)
       let cues = s.beginGuide(at: Self.now())
       session = s
       phase = s.phase
@@ -189,8 +229,17 @@ final class SessionRunner {
 
   /// 学習を終え、結果を返す(計測を始める前なら nil)
   @discardableResult
-  func finish() -> SessionSummary? {
-    let result = session?.finish(at: Self.now())
+  func finish(reason: String = "manual") -> SessionSummary? {
+    let endT = Self.now()
+    let result = session?.finish(at: endT)
+    if let result, let s = session {
+      scenarioResults = scenario?.results()
+      writeExport(summary: result, session: s, reason: reason, endT: endT)
+      if let r = scenarioResults {
+        usage("scenario_complete", ["passed": String(r.filter { $0.pass == true }.count), "reason": reason])
+        if reason != "scenario_done" { sound.gentle() }
+      }
+    }
     if let result, let s = session, var rec = record {
       let previous = store?.latestFinished()
       let recent = recentFocusMin(store?.sessions(since: StudyDay.recentDates(7, until: Date()).first ?? "") ?? [], excluding: rec.id, now: Date())
@@ -235,12 +284,16 @@ final class SessionRunner {
     if record != nil { usage("result_card_view") }
   }
 
-  /// 計測を始めたときに、学習の記録を作って保存する
+  /// 計測を始めたときに、学習の記録を作って保存する(検証モードは学習の記録に入れず、書き出しだけ行う)
   private func createRecord() {
     guard let s = session, let t0 = s.startT else { return }
     wallStart = Date()
     tStart = t0
     studyStartedAt = wallStart
+    if mode == .scenario {
+      usage("scenario_start", ["setup": s.setup.rawValue])
+      return
+    }
     let timer = s.breakTimer
     let preset =
       !timer.enabled ? "none" : timer.studyMin == 25 && timer.breakMin == 5 ? "25_5" : timer.studyMin == 50 && timer.breakMin == 10 ? "50_10" : "custom"
@@ -284,8 +337,10 @@ final class SessionRunner {
   }
 
   private var isFailed: Bool {
-    if case .failed = status { return true }
-    return false
+    switch status {
+    case .failed, .cameraDenied: true
+    default: false
+    }
   }
 
   private func stopDevices() {
@@ -319,8 +374,88 @@ final class SessionRunner {
     debug.handsCount = f.hands.count
     debug.rotation = result.rotation.rawValue
     if let out = session?.lastOutput { debug.state = out.away ? "離席中" : out.state.label }
+    if phase == .studying {
+      perfMs.append(result.processingMs)
+      if perfFirstT == nil { perfFirstT = f.t }
+      perfLastT = f.t
+    }
     handle(cues)
     persistProgress()
+    if mode == .scenario { scenarioStep(f.t) }
+  }
+
+  /// 検証モード:計測を始めてからの時間で場面を進め、場面ごとに判定を記録する(試作品の app.js の scenarioStep と同じ)
+  private func scenarioStep(_ t: Double) {
+    guard var run = scenario, let s = session, let t0 = s.startT else { return }
+    let kind: TimeKind
+    let output: AnalysisOutput?
+    switch s.phase {
+    case .studying:
+      output = s.lastOutput
+      kind = output.map { $0.away ? .away : TimeKind($0.state) } ?? .think
+    case .paused:
+      output = nil
+      kind = .paused
+    default:
+      return
+    }
+    let dt = lastScenarioT.map { Swift.min(1, (t - $0) / 1000) } ?? 0
+    lastScenarioT = t
+    let cues = run.update(elapsedSec: (t - t0) / 1000, dt: dt, kind: kind, output: output)
+    scenario = run
+    scenarioPosition = run.position
+    for cue in cues {
+      switch cue {
+      case .phaseIntro(let index):
+        // 前の場面の終わりの音と、次の場面の指示
+        sound.stopAlarm()
+        if index > 0 { sound.beep(freq: 1046, sec: 0.3, volume: 0.5) }
+        voice.say(ScenarioRun.introSpeech(index), interrupt: true)
+      case .phaseStart:
+        sound.beep(freq: 784, sec: 0.12)
+      case .done:
+        // 終了でカメラと読み上げを止めてから、終わりを伝える
+        finish(reason: "scenario_done")
+        sound.beep(freq: 1046, sec: 0.3, volume: 0.5)
+        voice.say("検証が終わりました。お疲れさまでした", interrupt: true)
+        onAutoFinish?()
+        return
+      }
+    }
+  }
+
+  /// 記録を JSON にして一時フォルダに書き出す(映像・画像・特徴点は含めない。結果の画面から本人が送る)
+  private func writeExport(summary: SessionSummary, session s: StudySession, reason: String, endT: Double) {
+    let t0 = s.startT ?? endT
+    let spanSec = perfFirstT.flatMap { a in perfLastT.map { ($0 - a) / 1000 } } ?? 0
+    let perf = perfSummary(
+      perfMs, frames: perfMs.count, spanSec: spanSec, errors: debug.errors, videoSize: videoSize, device: Self.deviceModel(), fov: fovDeg)
+    let export = SessionExport(
+      appVersion: Self.appVersion, createdAt: wallStart, reason: reason, mode: mode.rawValue, session: s, summary: summary,
+      durationSec: (endT - t0) / 1000, scenario: scenarioResults, perf: perf)
+    do {
+      let f = DateFormatter()
+      f.locale = Locale(identifier: "en_US_POSIX")
+      f.dateFormat = "yyyyMMdd-HHmm"
+      let url = FileManager.default.temporaryDirectory.appendingPathComponent("tsukuelog-\(mode.rawValue)-\(f.string(from: wallStart)).json")
+      try export.json().write(to: url, options: .atomic)
+      exportURL = url
+    } catch {
+      debug.errors += 1
+    }
+  }
+
+  static var appVersion: String {
+    Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0"
+  }
+
+  /// 端末の機種名(例:iPhone15,2)
+  static func deviceModel() -> String {
+    var info = utsname()
+    uname(&info)
+    return withUnsafeBytes(of: &info.machine) { raw in
+      String(decoding: raw.prefix { $0 != 0 }, as: UTF8.self)
+    }
   }
 
   private func handle(_ cues: [SessionCue]) {
@@ -350,7 +485,8 @@ final class SessionRunner {
         createRecord()
         usage("ritual_complete")
         sound.gentle()
-        voice.say("学習を始めます")
+        // 検証モードでは、すぐに場面の指示を読み上げる
+        if mode == .free { voice.say("学習を始めます") }
       case .resumed:
         sound.gentle()
         voice.say("学習に戻ります")
@@ -385,8 +521,10 @@ final class SessionRunner {
     }
   }
 
-  /// 判定の出来事を音で知らせる(設計書 3.13、試作品の app.js の notify と同じ)
+  /// 判定の出来事を音で知らせる(設計書 3.13、試作品の app.js の notify と同じ)。
+  /// 検証モードでは、場面の指示と重ならないよう読み上げない(居眠りの音と注意の音は鳴らす)
   private func notify(_ ev: AnalysisEvent) {
+    let quiet = mode == .scenario
     switch ev.type {
     case .sleep:
       sound.startAlarm()
@@ -401,13 +539,13 @@ final class SessionRunner {
       }
     case .awayStart:
       sound.stopAlarm()
-      voice.say("離席として記録します")
+      if !quiet { voice.say("離席として記録します") }
     case .awayEnd:
-      voice.say("おかえりなさい。再開します")
+      if !quiet { voice.say("おかえりなさい。再開します") }
     case .postureClose:
-      voice.say("目が机に近すぎます。少し離しましょう")
+      if !quiet { voice.say("目が机に近すぎます。少し離しましょう") }
     case .postureSlouch:
-      voice.say("背中が丸まっています。姿勢を戻しましょう")
+      if !quiet { voice.say("背中が丸まっています。姿勢を戻しましょう") }
     default:
       break
     }

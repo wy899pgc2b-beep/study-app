@@ -164,6 +164,32 @@ final class Store {
     } ?? nil
   }
 
+  /// 全部の記録を JSON にして一時フォルダに書き出す(設定の「記録を書き出す」。映像・画像・特徴点は保存していないので含まれない)
+  func exportAll(appVersion: String, grade: String?) -> URL? {
+    guard
+      let export = read({ db in
+        RecordsExport(
+          appVersion: appVersion, exportedAt: Date(), grade: grade,
+          sessions: try SessionRecord.order(Column("startedAt")).fetchAll(db),
+          minutes: try MinuteRow.order(Column("sessionId"), Column("minuteIndex")).fetchAll(db),
+          events: try EventRow.order(Column("at")).fetchAll(db),
+          intervals: try IntervalRow.order(Column("startedAt")).fetchAll(db),
+          usage: try UsageEvent.order(Column("at")).fetchAll(db))
+      })
+    else { return nil }
+    do {
+      let f = DateFormatter()
+      f.locale = Locale(identifier: "en_US_POSIX")
+      f.dateFormat = "yyyyMMdd-HHmm"
+      let url = FileManager.default.temporaryDirectory.appendingPathComponent("tsukuelog-records-\(f.string(from: export.exportedAt)).json")
+      try export.json().write(to: url, options: .atomic)
+      return url
+    } catch {
+      log.error("書き出せませんでした: \(error.localizedDescription, privacy: .public)")
+      return nil
+    }
+  }
+
   private func write(_ body: (Database) throws -> Void) {
     do {
       try db.write(body)

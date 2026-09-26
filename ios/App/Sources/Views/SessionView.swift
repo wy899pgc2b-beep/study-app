@@ -18,6 +18,8 @@ struct SessionView: View {
         darkScreen { ProgressView("準備しています…").tint(.white).foregroundStyle(.white).font(AppFont.regular(16)) }
       case .failed(let message):
         failed(message)
+      case .cameraDenied:
+        cameraDenied
       case .running:
         switch phase {
         case .paused:
@@ -78,7 +80,11 @@ struct SessionView: View {
     case .ritual(let step):
       RitualView(step: step)
     case .studying:
-      StudyingLamp(startedAt: runner.studyStartedAt)
+      if runner.mode == .scenario {
+        ScenarioProgressView(position: runner.scenarioPosition)
+      } else {
+        StudyingLamp(startedAt: runner.studyStartedAt)
+      }
     default:
       EmptyView()
     }
@@ -91,6 +97,27 @@ struct SessionView: View {
         Text(message).font(AppFont.regular(17)).foregroundStyle(Palette.ink).multilineTextAlignment(.center)
         Button("ホームに戻る") { model.backHome() }.buttonStyle(PrimaryButtonStyle(height: 60, fontSize: 20))
       }
+      .padding(24)
+    }
+  }
+
+  /// カメラが許可されていないとき(MVP の設計 S-01。カメラなしで時間だけ記録する使い方は、後で加える)
+  private var cameraDenied: some View {
+    ZStack {
+      PaperBackground()
+      VStack(spacing: 18) {
+        Image(systemName: "camera.fill").font(.system(size: 40)).foregroundStyle(Palette.subInk).accessibilityHidden(true)
+        Text("カメラが使えません").font(AppFont.bold(22))
+        Text("学習の様子を判定するには、カメラの許可が必要です。「設定を開く」から、ツクエログのカメラをオンにしてください。映像はこの iPhone の中だけで解析します")
+          .font(AppFont.regular(15)).foregroundStyle(Palette.subInk).multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+        Button("設定を開く") {
+          if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+        }
+        .buttonStyle(PrimaryButtonStyle(height: 60, fontSize: 20))
+        Button("ホームに戻る") { model.backHome() }
+          .buttonStyle(OutlineButtonStyle(selected: false, height: 52))
+      }
+      .foregroundStyle(Palette.ink)
       .padding(24)
     }
   }
@@ -178,6 +205,31 @@ struct StudyingLamp: View {
   private func elapsed(from start: Date, to now: Date) -> String {
     let s = Swift.max(0, Int(now.timeIntervalSince(start)))
     return s >= 3600 ? String(format: "%d:%02d:%02d", s / 3600, s / 60 % 60, s % 60) : String(format: "%d:%02d", s / 60, s % 60)
+  }
+}
+
+/// 検証モードの学習中:いまの場面と残り時間(試作品の検証シナリオの表示と同じ)。指示は声で伝える
+struct ScenarioProgressView: View {
+  var position: Scenario.Position?
+
+  var body: some View {
+    VStack(spacing: 14) {
+      Text("検証モード").font(AppFont.regular(14)).foregroundStyle(Palette.dimText)
+      if let p = position {
+        let phase = Scenario.phases[p.index]
+        Text("\(p.index + 1) / \(Scenario.phases.count)").font(AppFont.regular(30).monospacedDigit()).foregroundStyle(Color(hex: 0x7A7A7A))
+        Text(p.inTransition ? "次:\(phase.label)" : phase.label).font(AppFont.bold(20)).foregroundStyle(Color(hex: 0x9A9A9A))
+        Text(p.inTransition ? "指示を聞いてください" : "あと \(Int((phase.sec - p.phaseElapsed).rounded(.up))) 秒")
+          .font(AppFont.regular(15).monospacedDigit()).foregroundStyle(Palette.dimText)
+        ProgressView(value: p.inTransition ? 0 : Swift.min(1, p.phaseElapsed / phase.sec))
+          .tint(Palette.lampGlow)
+          .frame(maxWidth: 240)
+      } else {
+        Text("まもなく始まります").font(AppFont.regular(17)).foregroundStyle(Color(hex: 0x9A9A9A))
+      }
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .accessibilityElement(children: .combine)
   }
 }
 

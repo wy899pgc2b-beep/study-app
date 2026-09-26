@@ -51,6 +51,11 @@ final class SoundPlayer {
     play([Tone(freq: 784, sec: 0.15, volume: 0.3, next: 0.15)])
   }
 
+  /// 検証モードの区切りの短い音(試作品の voice.beep と同じ)
+  func beep(freq: Double, sec: Double, volume: Float = 0.3) {
+    play([Tone(freq: freq, sec: sec, volume: volume, next: sec)])
+  }
+
   /// 居眠りのアラーム。止めるまで鳴らし、音量を段階的に上げる(設計書 3.8)
   func startAlarm() {
     guard alarmTimer == nil else { return }
