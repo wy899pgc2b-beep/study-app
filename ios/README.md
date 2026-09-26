@@ -24,7 +24,9 @@
 | `Analyzer.swift` | `Analyzer` | フレームごとの状態と出来事(設計書 4.4〜4.11) |
 | `SessionRecorder.swift` | `SessionRecorder` ほか | 1 分ごとの集中度と学習スタイル(設計書 4.5、4.6) |
 | `Segmentation.swift` | `segmentStats`(vision.js) | 髪・顔の肌・人の面積 |
-| `StudySession.swift` | `app.js` の流れ | 1 回の学習の流れ(開始の儀式 → 学習中 → 一時停止・休憩 → 終了)。儀式の順番は設計書 4.12(目を閉じる → 姿勢) |
+| `StudySession.swift` | `app.js` の流れ | 1 回の学習の流れ(設置位置ガイド → 開始の儀式 → 学習中 → 一時停止・休憩 → 終了)。儀式の順番は設計書 4.12(目を閉じる → 姿勢)。休憩の後は位置を確かめ、姿勢だけを記録し直す |
+| `PlacementGuide.swift` | `app.js` の guideStep | 設置位置ガイド(顔の位置と大きさ、明るさ、肩、横向きのときは傾き 10〜20° とペンを持った手)。足りないものを声で知らせる |
+| `ResultCard.swift` | − | 結果カードの文(褒め言葉と明日の一手の規則。言い回しを複数用意し、前回と同じ文を続けない) |
 | `Config.swift` | `DEFAULTS` | しきい値。`prototype/tools/gen-swift-config.mjs` で作る(手で書き換えない) |
 
 ### 試作品と同じ判定になっているかの確かめ方
@@ -52,7 +54,7 @@ node tools/export-parity-fixtures.mjs   # 突き合わせ用のデータを作�
 
 手元に Swift があれば、`cd ios/StudyCore && swift test` でも確かめられる。
 
-## App(iPhone アプリの骨組み)
+## App(iPhone アプリ「ツクエログ」(仮の名前)の骨組み)
 
 | ファイル | 中身 |
 | --- | --- |
@@ -60,10 +62,10 @@ node tools/export-parity-fixtures.mjs   # 突き合わせ用のデータを作�
 | `Podfile` | MediaPipe(`MediaPipeTasksVision`) |
 | `scripts/fetch-models.sh` | MediaPipe のモデルを取ってくる(試作品と同じ 4 つ。リポジトリには入れない) |
 | `Sources/Capture/` | カメラ(バックカメラ・4:3・毎秒 5 回)、傾き(Core Motion)、端末内 AI、フレームから特徴量まで |
-| `Sources/Session/` | 学習の実行(StudySession を動かし、音声で案内する) |
-| `Sources/Views/` | ホーム(休憩タイマーのスイッチ)、学習中(画面は黒。触れると一時停止)、結果 |
+| `Sources/Session/` | 学習の実行(StudySession を動かし、声と音で知らせる。うとうとの注意音、居眠りのアラーム、区切りのやさしい音) |
+| `Sources/Views/` | ホーム(休憩タイマーのスイッチ)、位置合わせ、学習中(画面は黒。触れると一時停止)、結果カード |
 
-まだ入れていないもの:設置位置ガイド、居眠りのアラーム音、結果カードの文の規則、端末の DB、オンボーディング、検証モード。
+まだ入れていないもの:端末の DB(記録の保存、過去 7 日との比べ)、オンボーディング、設定画面、検証モード、利用状況の記録。
 
 ### ビルド
 

@@ -23,6 +23,15 @@ final class StudySessionTests: XCTestCase {
     return f
   }
 
+  /// 横向きの位置合わせに合う顔(ペンを持った手が映り、傾きは 15°)
+  func guideFace(_ t: Double) -> Features {
+    var f = face(t)
+    f.cameraTiltDeg = 15
+    let hand = HandFeatures(pts: Array(repeating: Landmark(x: 0.5, y: 0.8), count: 21), centroid: Point2(x: 0.5, y: 0.8))
+    f.hands = [hand]
+    return f
+  }
+
   /// 儀式を最後まで行い、計測を始めた時刻を返す。儀式の間の合図を cues に集める
   func runRitual(_ s: inout StudySession, from t0: Double, cues: inout [SessionCue]) -> Double {
     cues += s.beginRitual(at: t0)
@@ -59,7 +68,8 @@ final class StudySessionTests: XCTestCase {
       cues += s.process(Features(t: t))
     }
     XCTAssertTrue(cues.contains(.ritualFailed))
-    XCTAssertEqual(s.phase, .ritual(.closeEyes), "位置合わせからやり直す")
+    XCTAssertTrue(cues.contains(.guideStarted(.landscape)))
+    XCTAssertEqual(s.phase, .guide, "位置合わせからやり直す")
     XCTAssertNil(s.recorder)
   }
 
@@ -115,11 +125,53 @@ final class StudySessionTests: XCTestCase {
     XCTAssertEqual(s.tick(at: t + 30_000), [], "休憩の途中")
     XCTAssertEqual(s.tick(at: t + 60_000), [.breakOver])
     XCTAssertEqual(s.tick(at: t + 61_000), [], "知らせるのは 1 回だけ")
-    s.endBreak(at: t + 70_000)
-    XCTAssertEqual(s.phase, .studying)
+    XCTAssertEqual(s.endBreak(at: t + 70_000), [.guideStarted(.landscape)], "位置を確かめてから戻る")
+    XCTAssertEqual(s.phase, .guide)
     XCTAssertEqual(s.breakSec, 70, accuracy: 0.01)
-    let summary = s.finish(at: t + 70_000)
-    XCTAssertEqual(summary?.studySec ?? 0, 60, accuracy: 0.5, "休憩は学習時間に入れない")
+    // 位置が合ったら、姿勢だけを記録して学習に戻る(目を閉じる段階は行わない)
+    t += 70_000
+    var back: [SessionCue] = []
+    while s.phase != .studying {
+      t += 200
+      back += s.process(guideFace(t), deviceLandscape: true)
+      XCTAssertLessThan(t, 400_000)
+      if t > 400_000 { break }
+    }
+    XCTAssertEqual(back, [.guideReady, .ritual(.posture), .resumed])
+    XCTAssertNotNil(s.calibration?.closedRef, "目を閉じたときの基準は前の値を使う")
+    let summary = s.finish(at: t)
+    XCTAssertEqual(summary?.studySec ?? 0, 60, accuracy: 0.5, "休憩と位置の確認は学習時間に入れない")
+  }
+
+  func testPauseCount() {
+    var s = StudySession()
+    var cues: [SessionCue] = []
+    var t = runRitual(&s, from: 0, cues: &cues)
+    for _ in 0..<3 {
+      t += 200
+      _ = s.process(face(t))
+      s.pause(at: t, reason: .touch)
+      s.pause(at: t, reason: .touch)  // 一時停止中にもう一度触れても数えない
+      s.resume(at: t)
+    }
+    XCTAssertEqual(s.pauseCount, 3)
+  }
+
+  func testGuideLeadsToRitual() {
+    var s = StudySession()
+    XCTAssertEqual(s.phase, .guide, "始めると位置合わせから")
+    XCTAssertEqual(s.beginGuide(at: 0), [.guideStarted(.landscape)])
+    var cues: [SessionCue] = []
+    var t = 0.0
+    while s.phase == .guide && t < 10_000 {
+      t += 200
+      cues += s.process(guideFace(t), deviceLandscape: true)
+    }
+    XCTAssertEqual(cues, [.guideReady, .ritual(.closeEyes)])
+    XCTAssertEqual(t, 3200, accuracy: 1, "3 秒そろったら進む")
+    let required = s.guideChecks.filter { !$0.label.hasPrefix("(任意)") }
+    XCTAssertFalse(required.isEmpty)
+    XCTAssertTrue(required.allSatisfy(\.ok), "\(required)")
   }
 
   func testFinishBeforeStartReturnsNil() {

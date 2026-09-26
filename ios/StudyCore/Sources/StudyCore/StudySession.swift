@@ -1,7 +1,7 @@
 import Foundation
 
-// 1 回の学習の流れ(開始の儀式 → 学習中 → 一時停止・休憩 → 終了)。画面・カメラ・音声から切り離した部分。
-// 設計書 3.1・3.11・3.24・4.12、MVP の設計 3 章。時刻はすべてミリ秒。
+// 1 回の学習の流れ(設置位置ガイド → 開始の儀式 → 学習中 → 一時停止・休憩 → 終了)。画面・カメラ・音声から切り離した部分。
+// 設計書 3.1・3.4・3.11・3.24・4.12、MVP の設計 3 章。時刻はすべてミリ秒。
 
 /// 開始の儀式の段階(設計書 4.12)
 public enum RitualStep: String, Codable, Sendable {
@@ -21,6 +21,8 @@ public enum PauseReason: String, Codable, Sendable {
 }
 
 public enum SessionPhase: Equatable, Sendable {
+  /// 設置位置ガイド
+  case guide
   case ritual(RitualStep)
   case studying
   case paused(PauseReason)
@@ -31,6 +33,12 @@ public enum SessionPhase: Equatable, Sendable {
 
 /// 画面や音声に伝えること
 public enum SessionCue: Equatable, Sendable {
+  /// 位置合わせを始めた(置き方の案内を読み上げる)
+  case guideStarted(SetupStyle)
+  /// 位置合わせで足りないもの(読み上げる)
+  case guide(GuidePrompt)
+  /// 位置が合った
+  case guideReady
   /// 儀式の次の段階に進んだ(案内を読み上げる)
   case ritual(RitualStep)
   /// 儀式の間に顔が映らず、基準を取れなかった(位置合わせからやり直す)
@@ -39,6 +47,8 @@ public enum SessionCue: Equatable, Sendable {
   case closedReferenceMissing
   /// 学習の計測を始めた
   case started
+  /// 休憩の後、学習に戻った
+  case resumed
   /// 休憩の時間になった
   case breakDue
   /// 休憩の時間が終わった
@@ -84,15 +94,20 @@ public struct StudySession: Sendable {
   public let timing: RitualTiming
   public let breakTimer: BreakTimer
 
-  public private(set) var phase: SessionPhase = .ritual(.closeEyes)
+  public private(set) var phase: SessionPhase = .guide
   public private(set) var calibration: Calibration?
   public private(set) var recorder: SessionRecorder?
   public private(set) var lastOutput: AnalysisOutput?
+  /// 位置合わせの確認の項目(画面に並べる)
+  public private(set) var guideChecks: [GuideCheck] = []
   /// 休憩した秒数の合計
   public private(set) var breakSec = 0.0
+  /// 画面に触れた・アプリを離れた回数
+  public private(set) var pauseCount = 0
   public private(set) var startT: Double?
 
   private var analyzer: Analyzer
+  private var guide: PlacementGuide
   private var stepStartT: Double?
   private var closedFeatures: [Features] = []
   private var postureFeatures: [Features] = []
@@ -101,6 +116,8 @@ public struct StudySession: Sendable {
   private var studySinceBreak = 0.0
   private var breakStartT: Double?
   private var breakOverSent = false
+  /// 休憩の後の位置の確認中(儀式は姿勢の記録だけにする)
+  private var returningFromBreak = false
 
   public init(
     cfg: AnalysisConfig = AnalysisConfig(), setup: SetupStyle = .landscape, autoAway: Bool = true, measuredEyeDeskCm: Double? = 35,
@@ -113,20 +130,33 @@ public struct StudySession: Sendable {
     self.timing = timing
     self.breakTimer = breakTimer
     self.analyzer = Analyzer(cfg: cfg, autoAway: autoAway, setup: setup)
+    self.guide = PlacementGuide(setup: setup)
   }
 
-  /// 儀式を始める(位置合わせの後)
+  /// 位置合わせを始める(「始める」を押したとき)
+  public mutating func beginGuide(at t: Double) -> [SessionCue] {
+    phase = .guide
+    guide = PlacementGuide(setup: setup)
+    guideChecks = []
+    return [.guideStarted(setup)]
+  }
+
+  /// 儀式を始める(位置が合ったとき。位置合わせを省いたときも)
   public mutating func beginRitual(at t: Double) -> [SessionCue] {
-    phase = .ritual(.closeEyes)
+    let first: RitualStep = returningFromBreak ? .posture : .closeEyes
+    phase = .ritual(first)
     stepStartT = t
-    closedFeatures = []
+    if !returningFromBreak { closedFeatures = [] }
     postureFeatures = []
-    return [.ritual(.closeEyes)]
+    return [.ritual(first)]
   }
 
-  /// 1 フレーム分の特徴量を渡す。儀式の記録、判定、1 分ごとの集計を進める
-  public mutating func process(_ f: Features) -> [SessionCue] {
+  /// 1 フレーム分の特徴量を渡す。位置合わせ、儀式の記録、判定、1 分ごとの集計を進める。
+  /// deviceLandscape:端末が横向きか(重力から。位置合わせに使う)
+  public mutating func process(_ f: Features, deviceLandscape: Bool? = nil) -> [SessionCue] {
     switch phase {
+    case .guide:
+      return guideStep(f, deviceLandscape: deviceLandscape)
     case .ritual(let step):
       return ritualStep(step, f)
     case .studying:
@@ -152,6 +182,7 @@ public struct StudySession: Sendable {
     guard phase == .studying else { return }
     closeSpan(at: t, studying: true)
     phase = .paused(reason)
+    pauseCount += 1
   }
 
   public mutating func resume(at t: Double) {
@@ -168,14 +199,14 @@ public struct StudySession: Sendable {
     breakOverSent = false
   }
 
-  /// 休憩を終えて学習に戻る(MVP の設計 3 章:位置の確認と姿勢の記録をしてから戻る)
-  public mutating func endBreak(at t: Double) {
-    guard phase == .onBreak, let bs = breakStartT else { return }
+  /// 休憩を終える。位置の確認と姿勢の記録をしてから学習に戻る(MVP の設計 3 章)
+  public mutating func endBreak(at t: Double) -> [SessionCue] {
+    guard phase == .onBreak, let bs = breakStartT else { return [] }
     breakSec += Swift.max(0, (t - bs) / 1000)
     breakStartT = nil
     studySinceBreak = 0
-    lastT = t
-    phase = .studying
+    returningFromBreak = true
+    return beginGuide(at: t)
   }
 
   /// 学習を終える。計測を始めていなければ nil
@@ -184,7 +215,9 @@ public struct StudySession: Sendable {
     switch phase {
     case .studying: closeSpan(at: t, studying: true)
     case .paused: closeSpan(at: t, studying: false)
-    case .onBreak: endBreak(at: t)
+    case .onBreak:
+      if let bs = breakStartT { breakSec += Swift.max(0, (t - bs) / 1000) }
+      breakStartT = nil
     default: break
     }
     phase = .finished
@@ -196,7 +229,14 @@ public struct StudySession: Sendable {
     return false
   }
 
-  // MARK: - 儀式
+  // MARK: - 位置合わせと儀式
+
+  private mutating func guideStep(_ f: Features, deviceLandscape: Bool?) -> [SessionCue] {
+    let step = guide.update(f, deviceLandscape: deviceLandscape)
+    guideChecks = step.checks
+    if step.ready { return [.guideReady] + beginRitual(at: f.t) }
+    return step.prompts.map { .guide($0) }
+  }
 
   private mutating func ritualStep(_ step: RitualStep, _ f: Features) -> [SessionCue] {
     let s0 = stepStartT ?? f.t
@@ -224,17 +264,26 @@ public struct StudySession: Sendable {
 
   private mutating func finishRitual(at t: Double) -> [SessionCue] {
     guard var cal = computeCalibration(postureFeatures, measuredEyeDeskCm: measuredEyeDeskCm, tiltDeg: setup.defaultTiltDeg) else {
-      stepStartT = nil
-      phase = .ritual(.closeEyes)
-      return [.ritualFailed]
+      // 顔が映っていなかった:位置合わせからやり直す
+      return [.ritualFailed] + beginGuide(at: t)
     }
-    cal.closedRef = computeClosedReference(closedFeatures, cal, cfg)
+    if returningFromBreak {
+      // 休憩の後は姿勢だけを記録し直し、目を閉じたときの基準は前の値を使う
+      cal.closedRef = calibration?.closedRef
+    } else {
+      cal.closedRef = computeClosedReference(closedFeatures, cal, cfg)
+    }
     calibration = cal
     analyzer.setCalibration(cal)
-    recorder = SessionRecorder(startT: t, cfg: cfg, autoAway: autoAway)
-    startT = t
     lastT = t
     phase = .studying
+    if returningFromBreak, recorder != nil {
+      returningFromBreak = false
+      return [.resumed]
+    }
+    returningFromBreak = false
+    recorder = SessionRecorder(startT: t, cfg: cfg, autoAway: autoAway)
+    startT = t
     var cues: [SessionCue] = [.started]
     if cal.closedRef == nil { cues.insert(.closedReferenceMissing, at: 0) }
     return cues

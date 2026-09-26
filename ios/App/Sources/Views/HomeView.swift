@@ -53,7 +53,7 @@ struct HomeView: View {
             .foregroundStyle(.secondary)
         }
       }
-      .navigationTitle("学習")
+      .navigationTitle("ツクエログ")
     }
   }
 

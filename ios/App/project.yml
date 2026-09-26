@@ -28,7 +28,7 @@ targets:
     info:
       path: Generated/Info.plist
       properties:
-        CFBundleDisplayName: "学習アプリ(仮)"
+        CFBundleDisplayName: "ツクエログ"
         CFBundleShortVersionString: "0.1.0"
         CFBundleVersion: "1"
         NSCameraUsageDescription: "学習中の様子を、この iPhone の中だけで解析するために使います。映像は保存も送信もしません。"

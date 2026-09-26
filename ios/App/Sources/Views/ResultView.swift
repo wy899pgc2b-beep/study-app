@@ -9,11 +9,15 @@ struct ResultView: View {
     NavigationStack {
       List {
         if let s = model.runner.summary {
-          Section {
-            // 結果カードの文の規則(MVP の設計 4 章)は、次の段階で StudyCore に入れる
-            Text("今日も机に向かえたね").font(.title2.bold())
-            LabeledContent("集中時間", value: minutes(s.effectiveFocusMin * 60))
-            LabeledContent("平均集中度", value: s.avgFocus.map { "\($0)%" } ?? "—")
+          if let card = model.runner.card {
+            // 褒め言葉を先に、集中時間はその後に(設計書 3.14)
+            Section {
+              Text(card.praise).font(.title2.bold())
+              LabeledContent("集中時間", value: minutes(card.focusMin * 60))
+              LabeledContent("平均集中度", value: card.avgFocus.map { "\($0)%" } ?? "—")
+              LabeledContent("学習時間", value: minutes(card.studyMin * 60)).font(.footnote)
+              Text(card.nextStep)
+            }
           }
           Section("時間の内訳") {
             LabeledContent("学習", value: minutes(s.studySec))

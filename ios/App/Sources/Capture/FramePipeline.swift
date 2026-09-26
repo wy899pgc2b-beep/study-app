@@ -9,6 +9,8 @@ final class FramePipeline: @unchecked Sendable {
     /// 解析にかかった時間(ミリ秒)
     var processingMs: Double
     var rotation: ImageRotation
+    /// 端末が横向きか(重力から。分からなければ nil)
+    var deviceLandscape: Bool?
   }
 
   private let vision: VisionEngine
@@ -62,7 +64,9 @@ final class FramePipeline: @unchecked Sendable {
       segment: det.segment
     )
     let features = extractFeatures(frame, cfg)
-    return Result(features: features, processingMs: Date().timeIntervalSince(started) * 1000, rotation: rotation)
+    return Result(
+      features: features, processingMs: Date().timeIntervalSince(started) * 1000, rotation: rotation,
+      deviceLandscape: gravity.flatMap { deviceIsLandscape(gravityX: $0.x, gravityY: $0.y) })
   }
 
   /// 画面全体の明るさ(0〜255)。試作品と同じく、16×12 の点の明るさの平均

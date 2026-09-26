@@ -41,6 +41,15 @@ struct SessionView: View {
   @ViewBuilder
   private func content(_ runner: SessionRunner) -> some View {
     switch runner.phase ?? .finished {
+    case .guide:
+      prompt("スマホの位置を合わせます(声の案内に従ってください)")
+      VStack(alignment: .leading, spacing: 6) {
+        ForEach(Array(runner.guideChecks.enumerated()), id: \.offset) { _, check in
+          Label(check.label, systemImage: check.ok ? "checkmark.circle.fill" : "circle")
+            .foregroundStyle(check.ok ? Color.green : Color.white)
+        }
+      }
+      Button("位置合わせを省く") { runner.skipGuide() }.buttonStyle(.bordered).tint(.white)
     case .ritual(.closeEyes):
       prompt("目を閉じて、ひと呼吸")
     case .ritual(.openEyes), .ritual(.posture):
