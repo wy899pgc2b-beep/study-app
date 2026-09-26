@@ -58,6 +58,14 @@ final class SessionRunner {
   private var perfLastT: Double?
   private var videoSize: String?
   private var fovDeg: Double?
+  /// 検証モードでこの回に行う場面(Scenario.phases の番号)と、終わったときに最後まで行った場面・あとで行う場面(id)
+  private(set) var scenarioOrder: [Int] = []
+  private(set) var scenarioCompleted: [String] = []
+  private(set) var scenarioRemaining: [String] = []
+  /// 案内のしかた(検証モードは声で指示するので、いつも声と音にする)
+  private(set) var soundMode: SoundMode = .voice
+  private let vibrator = Vibrator()
+  private var lastNudgeT: Double?
 
   struct DebugInfo: Equatable {
     var fps = 0.0
@@ -97,7 +105,8 @@ final class SessionRunner {
   /// 解析の時刻(ミリ秒)を、壁時計の時刻にする
   private func wall(_ t: Double) -> Date { wallStart.addingTimeInterval((t - tStart) / 1000) }
 
-  func start(settings: StudySettings, mode: SessionMode = .free) async {
+  /// scenarioPhases:検証モードで行う場面(省くと 9 場面すべて)
+  func start(settings: StudySettings, mode: SessionMode = .free, scenarioPhases: [Int]? = nil) async {
     guard status == .idle || isFailed else { return }
     status = .preparing
     summary = nil
@@ -106,7 +115,12 @@ final class SessionRunner {
     savedMinutes = 0
     savedIntervals = 0
     self.mode = mode
-    scenario = mode == .scenario ? ScenarioRun(setup: settings.setup) : nil
+    scenario = mode == .scenario ? ScenarioRun(setup: settings.setup, phases: scenarioPhases) : nil
+    scenarioOrder = scenario?.order ?? []
+    scenarioCompleted = []
+    scenarioRemaining = []
+    soundMode = mode == .scenario ? .voice : settings.soundMode
+    lastNudgeT = nil
     scenarioPosition = nil
     scenarioResults = nil
     lastScenarioT = nil
@@ -169,15 +183,21 @@ final class SessionRunner {
     session?.pause(at: Self.now(), reason: reason)
     phase = session?.phase
     sound.stopAlarm()
+    vibrator.stopAlarm()
     pausedAt = Date()
     pauseSummary = session?.recorder?.summary()
     pausedLong = false
     pauseTimer?.invalidate()
-    pauseTimer = Timer.scheduledTimer(withTimeInterval: 600, repeats: false) { [weak self] _ in
-      Task { @MainActor in
-        guard let self, self.session?.isPaused == true else { return }
-        self.pausedLong = true
-        self.voice.say("一時停止から10分たちました。今日はここまでにしますか")
+    if mode == .scenario {
+      // 検証モード:指示の読み上げを止める。戻ったら今の場面を指示からやり直すか、飛ばす
+      voice.stop()
+    } else {
+      pauseTimer = Timer.scheduledTimer(withTimeInterval: 600, repeats: false) { [weak self] _ in
+        Task { @MainActor in
+          guard let self, self.session?.isPaused == true else { return }
+          self.pausedLong = true
+          self.say("一時停止から10分たちました。今日はここまでにしますか")
+        }
       }
     }
     usage("session_pause", ["reason": reason == .touch ? "touch" : "app"])
@@ -208,11 +228,30 @@ final class SessionRunner {
 
   func resume() {
     guard session?.isPaused == true else { return }
+    if mode == .scenario {
+      // 途中まで行った場面は、指示からやり直す(飛ばしたときは、次の場面の指示から始まる)
+      scenario?.restartCurrent()
+      scenarioPosition = nil
+      lastScenarioT = nil
+    }
     session?.resume(at: Self.now())
     phase = session?.phase
     clearPause()
     usage("session_resume")
     persistProgress()
+  }
+
+  /// 検証モードで今の場面(Scenario.phases の番号)
+  var scenarioCurrentIndex: Int? { scenario?.currentIndex }
+
+  /// 検証モード:一時停止している場面を飛ばして、次の場面に進む(飛ばした場面はあとで行う)
+  func skipScenarioPhase() {
+    guard mode == .scenario, session?.isPaused == true, var run = scenario else { return }
+    let id = run.currentIndex.map { Scenario.phases[$0].id } ?? ""
+    run.skipCurrent()
+    scenario = run
+    usage("scenario_phase_skipped", ["phase": id])
+    resume()
   }
 
   func endBreak() {
@@ -232,11 +271,17 @@ final class SessionRunner {
   func finish(reason: String = "manual") -> SessionSummary? {
     let endT = Self.now()
     let result = session?.finish(at: endT)
+    if let run = scenario {
+      scenarioCompleted = run.completed
+      scenarioRemaining = run.remaining
+    }
     if let result, let s = session {
       scenarioResults = scenario?.results()
       writeExport(summary: result, session: s, reason: reason, endT: endT)
       if let r = scenarioResults {
-        usage("scenario_complete", ["passed": String(r.filter { $0.pass == true }.count), "reason": reason])
+        usage(
+          "scenario_complete",
+          ["passed": String(r.filter { $0.pass == true }.count), "done": String(r.count), "remaining": String(scenarioRemaining.count), "reason": reason])
         if reason != "scenario_done" { sound.gentle() }
       }
     }
@@ -255,13 +300,14 @@ final class SessionRunner {
       rec.nextStep = c.nextStep
       record = rec
       persistProgress(final: true)
+      if !silent { sound.gentle() }
       usage(
         "session_complete",
         [
           "studyMin": String(Int(result.studySec / 60)), "focusMin": String(Int(result.effectiveFocusMin)),
           "avgFocus": result.avgFocus.map(String.init) ?? "", "breakMin": String(Int(s.breakSec / 60)),
+          "sound": soundMode.rawValue,
         ])
-      sound.gentle()
     }
     stopDevices()
     summary = result
@@ -349,6 +395,7 @@ final class SessionRunner {
     breakTimer = nil
     breakEndsAt = nil
     sound.stopAlarm()
+    vibrator.stopAlarm()
     camera?.stop()
     camera?.onFrame = nil
     camera = nil
@@ -386,19 +433,10 @@ final class SessionRunner {
 
   /// 検証モード:計測を始めてからの時間で場面を進め、場面ごとに判定を記録する(試作品の app.js の scenarioStep と同じ)
   private func scenarioStep(_ t: Double) {
-    guard var run = scenario, let s = session, let t0 = s.startT else { return }
-    let kind: TimeKind
-    let output: AnalysisOutput?
-    switch s.phase {
-    case .studying:
-      output = s.lastOutput
-      kind = output.map { $0.away ? .away : TimeKind($0.state) } ?? .think
-    case .paused:
-      output = nil
-      kind = .paused
-    default:
-      return
-    }
+    // 一時停止の間は進めない(戻ったら、今の場面を指示からやり直す)
+    guard var run = scenario, let s = session, let t0 = s.startT, s.phase == .studying else { return }
+    let output = s.lastOutput
+    let kind: TimeKind = output.map { $0.away ? .away : TimeKind($0.state) } ?? .think
     let dt = lastScenarioT.map { Swift.min(1, (t - $0) / 1000) } ?? 0
     lastScenarioT = t
     let cues = run.update(elapsedSec: (t - t0) / 1000, dt: dt, kind: kind, output: output)
@@ -410,7 +448,7 @@ final class SessionRunner {
         // 前の場面の終わりの音と、次の場面の指示
         sound.stopAlarm()
         if index > 0 { sound.beep(freq: 1046, sec: 0.3, volume: 0.5) }
-        voice.say(ScenarioRun.introSpeech(index), interrupt: true)
+        voice.say(run.introSpeech(index), interrupt: true)
       case .phaseStart:
         sound.beep(freq: 784, sec: 0.12)
       case .done:
@@ -432,7 +470,7 @@ final class SessionRunner {
       perfMs, frames: perfMs.count, spanSec: spanSec, errors: debug.errors, videoSize: videoSize, device: Self.deviceModel(), fov: fovDeg)
     let export = SessionExport(
       appVersion: Self.appVersion, createdAt: wallStart, reason: reason, mode: mode.rawValue, session: s, summary: summary,
-      durationSec: (endT - t0) / 1000, scenario: scenarioResults, perf: perf)
+      durationSec: (endT - t0) / 1000, scenario: scenarioResults, scenarioRemaining: mode == .scenario ? scenarioRemaining : nil, perf: perf)
     do {
       let f = DateFormatter()
       f.locale = Locale(identifier: "en_US_POSIX")
@@ -462,39 +500,53 @@ final class SessionRunner {
     for cue in cues {
       switch cue {
       case .guideStarted(let setup):
-        voice.say(PlacementGuide.introSpeech(setup), interrupt: true)
+        // 消音:最初の 20 秒は、置いている途中なので知らせない
+        lastNudgeT = Self.now()
+        say(PlacementGuide.introSpeech(setup), interrupt: true)
       case .guide(let prompt):
-        voice.say(prompt.speech)
+        if silent { nudge() } else { voice.say(prompt.speech) }
       case .guideReady:
         usage("ritual_start")
-        sound.ok()
-        voice.say("位置はOKです", interrupt: true)
+        if silent {
+          vibrator.pulse(1)
+        } else {
+          sound.ok()
+          voice.say("位置はOKです", interrupt: true)
+        }
       case .ritual(.closeEyes):
-        voice.say("目を閉じて、ひと呼吸してください")
+        say("目を閉じて、ひと呼吸してください")
       case .ritual(.openEyes):
-        sound.ok()
-        voice.say("目を開けて、教材を見てください", interrupt: true)
+        if silent {
+          vibrator.pulse(2)
+        } else {
+          sound.ok()
+          voice.say("目を開けて、教材を見てください", interrupt: true)
+        }
       case .ritual(.posture):
         // 休憩の後は、目を閉じる段階を行わずに姿勢を記録する
-        if session?.startT != nil { voice.say("教材を見てください") }
+        if session?.startT != nil { say("教材を見てください") }
       case .ritualFailed:
-        voice.say("顔が映っていなかったため、もう一度位置を合わせます", interrupt: true)
+        if silent { vibrator.long() } else { voice.say("顔が映っていなかったため、もう一度位置を合わせます", interrupt: true) }
       case .closedReferenceMissing:
-        voice.say("目を閉じたときの記録ができませんでした。このまま始めます")
+        say("目を閉じたときの記録ができませんでした。このまま始めます")
       case .started:
         createRecord()
         usage("ritual_complete")
-        sound.gentle()
+        if !silent { sound.gentle() }
         // 検証モードでは、すぐに場面の指示を読み上げる
-        if mode == .free { voice.say("学習を始めます") }
+        if mode == .free { say("学習を始めます") }
       case .resumed:
-        sound.gentle()
-        voice.say("学習に戻ります")
+        if !silent { sound.gentle() }
+        say("学習に戻ります")
       case .breakDue:
         startBreakCountdown(minutes: session?.currentBreakMin ?? 5)
       case .breakOver:
-        sound.gentle()
-        voice.say("休憩の時間が終わりました。準備ができたら、休憩を終えるを押してください")
+        if silent {
+          vibrator.pulse(3)
+        } else {
+          sound.gentle()
+          voice.say("休憩の時間が終わりました。準備ができたら、休憩を終えるを押してください")
+        }
       case .event(let ev):
         debug.lastEvent = ev.type.rawValue
         if let rec = record { store?.add(events: [EventRow(sessionId: rec.id, type: ev.type, at: wall(ev.t))]) }
@@ -503,13 +555,34 @@ final class SessionRunner {
     }
   }
 
+  /// 消音モード(振動だけ)か
+  private var silent: Bool { soundMode == .vibrate }
+
+  /// 声で伝える(消音モードでは伝えない)
+  private func say(_ text: String, interrupt: Bool = false) {
+    if !silent { voice.say(text, interrupt: interrupt) }
+  }
+
+  /// 消音モードで、位置がまだ合っていないことを長い振動で知らせる(20 秒に 1 回まで)
+  private func nudge() {
+    let t = Self.now()
+    if let last = lastNudgeT, t - last < 20_000 { return }
+    lastNudgeT = t
+    vibrator.long()
+  }
+
   private func startBreakCountdown(minutes: Int) {
     // 休憩中はカメラを止める(MVP の設計 3 章)
     camera?.stop()
     sound.stopAlarm()
-    sound.gentle()
+    vibrator.stopAlarm()
     usage("break_start")
-    voice.say("休憩の時間です。\(minutes)分休みましょう", interrupt: true)
+    if silent {
+      vibrator.pulse(3)
+    } else {
+      sound.gentle()
+      voice.say("休憩の時間です。\(minutes)分休みましょう", interrupt: true)
+    }
     breakEndsAt = Date().addingTimeInterval(Double(minutes) * 60)
     breakTotalSec = Double(minutes) * 60
     breakTimer?.invalidate()
@@ -522,30 +595,32 @@ final class SessionRunner {
   }
 
   /// 判定の出来事を音で知らせる(設計書 3.13、試作品の app.js の notify と同じ)。
-  /// 検証モードでは、場面の指示と重ならないよう読み上げない(居眠りの音と注意の音は鳴らす)
+  /// 検証モードでは、場面の指示と重ならないよう読み上げない(居眠りの音と注意音は鳴らす)。消音モードでは振動だけ
   private func notify(_ ev: AnalysisEvent) {
     let quiet = mode == .scenario
     switch ev.type {
     case .sleep:
-      sound.startAlarm()
+      if silent { vibrator.startAlarm() } else { sound.startAlarm() }
     case .wake:
       sound.stopAlarm()
+      vibrator.stopAlarm()
     case .drowsy:
       // 判定がちらついて何度も鳴らないよう、一定の間隔をあける
       let minGap = (session?.cfg.drowsyBeepMinSec ?? 60) * 1000
       if lastDrowsyChimeT.map({ ev.t - $0 >= minGap }) ?? true {
         lastDrowsyChimeT = ev.t
-        sound.chime()
+        if silent { vibrator.pulse(2) } else { sound.chime() }
       }
     case .awayStart:
       sound.stopAlarm()
-      if !quiet { voice.say("離席として記録します") }
+      vibrator.stopAlarm()
+      if !quiet { say("離席として記録します") }
     case .awayEnd:
-      if !quiet { voice.say("おかえりなさい。再開します") }
+      if !quiet { say("おかえりなさい。再開します") }
     case .postureClose:
-      if !quiet { voice.say("目が机に近すぎます。少し離しましょう") }
+      if !quiet { say("目が机に近すぎます。少し離しましょう") }
     case .postureSlouch:
-      if !quiet { voice.say("背中が丸まっています。姿勢を戻しましょう") }
+      if !quiet { say("背中が丸まっています。姿勢を戻しましょう") }
     default:
       break
     }

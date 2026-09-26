@@ -23,7 +23,7 @@ struct SessionView: View {
       case .running:
         switch phase {
         case .paused:
-          PausedScreen()
+          if runner.mode == .scenario { ScenarioPausedScreen() } else { PausedScreen() }
         case .onBreak:
           BreakScreen()
         default:
@@ -64,7 +64,12 @@ struct SessionView: View {
     case .guide:
       VStack(spacing: 20) {
         Text("位置を合わせているよ").font(AppFont.bold(24)).foregroundStyle(.white)
-        Text("声の案内に合わせて、スマホを動かしてね").font(AppFont.regular(15)).foregroundStyle(Palette.dimText)
+        Text(
+          runner.soundMode == .vibrate
+            ? "振動 1 回で位置が合ったよ。目を閉じてひと呼吸して、振動 2 回で目を開けて教材を見てね。長い振動は、まだ合っていない合図"
+            : "声の案内に合わせて、スマホを動かしてね"
+        )
+        .font(AppFont.regular(15)).foregroundStyle(Palette.dimText).multilineTextAlignment(.center)
         VStack(alignment: .leading, spacing: 10) {
           ForEach(Array(runner.guideChecks.enumerated()), id: \.offset) { _, check in
             Label(check.label, systemImage: check.ok ? "checkmark.circle.fill" : "circle")
@@ -81,7 +86,7 @@ struct SessionView: View {
       RitualView(step: step)
     case .studying:
       if runner.mode == .scenario {
-        ScenarioProgressView(position: runner.scenarioPosition)
+        ScenarioProgressView(position: runner.scenarioPosition, order: runner.scenarioOrder)
       } else {
         StudyingLamp(startedAt: runner.studyStartedAt)
       }
@@ -211,13 +216,15 @@ struct StudyingLamp: View {
 /// 検証モードの学習中:いまの場面と残り時間(試作品の検証シナリオの表示と同じ)。指示は声で伝える
 struct ScenarioProgressView: View {
   var position: Scenario.Position?
+  /// この回に行う場面(飛ばした場面をあとで行うときは一部だけ)
+  var order: [Int]
 
   var body: some View {
     VStack(spacing: 14) {
       Text("検証モード").font(AppFont.regular(14)).foregroundStyle(Palette.dimText)
       if let p = position {
         let phase = Scenario.phases[p.index]
-        Text("\(p.index + 1) / \(Scenario.phases.count)").font(AppFont.regular(30).monospacedDigit()).foregroundStyle(Color(hex: 0x7A7A7A))
+        Text("\((order.firstIndex(of: p.index) ?? 0) + 1) / \(order.count)").font(AppFont.regular(30).monospacedDigit()).foregroundStyle(Color(hex: 0x7A7A7A))
         Text(p.inTransition ? "次:\(phase.label)" : phase.label).font(AppFont.bold(20)).foregroundStyle(Color(hex: 0x9A9A9A))
         Text(p.inTransition ? "指示を聞いてください" : "あと \(Int((phase.sec - p.phaseElapsed).rounded(.up))) 秒")
           .font(AppFont.regular(15).monospacedDigit()).foregroundStyle(Palette.dimText)
@@ -227,9 +234,52 @@ struct ScenarioProgressView: View {
       } else {
         Text("まもなく始まります").font(AppFont.regular(17)).foregroundStyle(Color(hex: 0x9A9A9A))
       }
+      Spacer().frame(height: 12)
+      Text("できない場面は、画面に触れると飛ばせるよ").font(AppFont.regular(13)).foregroundStyle(Palette.dimText)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .accessibilityElement(children: .combine)
+  }
+}
+
+/// 検証モードの一時停止:今の場面を指示からやり直す/飛ばす(あとで行う)/やめる(残りはあとで行う)
+struct ScenarioPausedScreen: View {
+  @Environment(AppModel.self) private var model
+
+  var body: some View {
+    let runner = model.runner
+    let order = runner.scenarioOrder
+    let current = runner.scenarioCurrentIndex
+    ZStack {
+      PaperBackground()
+      VStack(spacing: 18) {
+        VStack(spacing: 10) {
+          Image(systemName: "pause.circle").font(.system(size: 56)).foregroundStyle(Palette.green).accessibilityHidden(true)
+          Text("検証を止めているよ").font(AppFont.bold(28, relativeTo: .title))
+          if let i = current {
+            Text("いまの場面:\((order.firstIndex(of: i) ?? 0) + 1) / \(order.count)  \(Scenario.phases[i].label)")
+              .font(AppFont.medium(17))
+          }
+          Text("周りの人が気になる場面や、いまはできない場面は、飛ばしてあとで行えるよ")
+            .font(AppFont.regular(15)).foregroundStyle(Palette.subInk).multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.top, 40)
+        Spacer()
+        Button("この場面からやり直す") { runner.resume() }
+          .buttonStyle(PrimaryButtonStyle(height: 72, fontSize: 23))
+        Button("この場面を飛ばす(あとで行う)") { runner.skipScenarioPhase() }
+          .buttonStyle(OutlineButtonStyle(selected: true, height: 60))
+          .disabled(current == nil)
+        Button("検証をやめる(残りはあとで行う)") { model.finish() }
+          .font(AppFont.regular(16))
+          .foregroundStyle(Palette.subInk)
+          .frame(maxWidth: .infinity, minHeight: 48)
+      }
+      .padding(.horizontal, 22)
+      .padding(.bottom, 24)
+    }
+    .foregroundStyle(Palette.ink)
   }
 }
 

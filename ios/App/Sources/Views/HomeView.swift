@@ -18,7 +18,11 @@ struct HomeView: View {
           if let step = model.pinnedNextStep {
             StickyNote(title: "今日の一手(前回の結果から)", text: step)
           }
+          if settings.scenarioInvited && !model.scenarioPending.isEmpty {
+            scenarioNote
+          }
           breakTimerCard(settings)
+          SoundModeCard()
           Button {
             model.beginFromHome()
           } label: {
@@ -53,6 +57,26 @@ struct HomeView: View {
       }
       .accessibilityLabel("設定")
       Image(systemName: "lamp.desk").font(.system(size: 30)).foregroundStyle(Palette.lamp).accessibilityHidden(true)
+    }
+  }
+
+  /// 検証モードを「あとで」にしたときの付箋(残りの場面だけ行える)
+  private var scenarioNote: some View {
+    let est = scenarioEstimate(model.scenarioPending)
+    return StickyNote(
+      title: "検証モードがまだです", text: "残り \(est.count) 場面(約 \(est.minutes) 分)。声の指示に合わせて行うよ。周りに人がいるときはイヤホンをつけてね", angle: 1
+    ) {
+      Button {
+        model.startScenario()
+      } label: {
+        Label("検証モードを始める", systemImage: "checklist")
+          .font(AppFont.bold(15))
+          .foregroundStyle(Color(hex: 0x6B4A0C))
+          .padding(.horizontal, 16)
+          .frame(minHeight: 44)
+          .background(Palette.stickyButton, in: RoundedRectangle(cornerRadius: 14))
+          .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(hex: 0x9A6A12), lineWidth: 2))
+      }
     }
   }
 
@@ -152,6 +176,7 @@ struct SettingsSheet: View {
   @Environment(\.dismiss) private var dismiss
   @State private var exportURL: URL?
   @State private var exportFailed = false
+  @State private var askScenarioRange = false
 
   var body: some View {
     NavigationStack {
@@ -189,10 +214,26 @@ struct SettingsSheet: View {
             }
           }
           Button {
-            dismiss()
-            model.startScenario()
+            let pending = model.scenarioPending.count
+            if pending > 0 && pending < Scenario.phases.count {
+              askScenarioRange = true
+            } else {
+              dismiss()
+              model.startScenario()
+            }
           } label: {
             Label("検証モードを始める", systemImage: "checklist")
+          }
+          .confirmationDialog("どの場面を行う?", isPresented: $askScenarioRange, titleVisibility: .visible) {
+            Button("残りの \(model.scenarioPending.count) 場面") {
+              dismiss()
+              model.startScenario(onlyPending: true)
+            }
+            Button("\(Scenario.phases.count) 場面すべて") {
+              dismiss()
+              model.startScenario(onlyPending: false)
+            }
+            Button("やめる", role: .cancel) {}
           }
         } header: {
           Text("記録と検証")
@@ -200,7 +241,7 @@ struct SettingsSheet: View {
           Text(
             exportFailed
               ? "記録を書き出せませんでした"
-              : "書き出す記録は、学習の時間・回数・集中度だけです。映像・画像・顔の特徴点は含まれません。検証モードは、声の指示に合わせて 9 つの場面(約 5 分)を行い、判定が合っているかを確かめます。学習の記録には入りません"
+              : "書き出す記録は、学習の時間・回数・集中度だけです。映像・画像・顔の特徴点は含まれません。検証モードは、声の指示に合わせて 9 つの場面(約 5 分)を行い、判定が合っているかを確かめます。学習の記録には入りません。済んだ場面 \(Scenario.phases.count - model.scenarioPending.count) / \(Scenario.phases.count)"
           )
         }
       }

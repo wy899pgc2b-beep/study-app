@@ -46,9 +46,12 @@ struct PlacementView: View {
               .background(Color.white, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
           }
-          Label("置いたあとは画面を見なくて大丈夫。ずれているところは、声で教えるね", systemImage: "speaker.wave.2")
-            .font(AppFont.regular(14))
-            .foregroundStyle(Palette.subInk)
+          if model.settings.soundMode == .voice {
+            Label("置いたあとは画面を見なくて大丈夫。ずれているところは、声で教えるね", systemImage: "speaker.wave.2")
+              .font(AppFont.regular(14))
+              .foregroundStyle(Palette.subInk)
+          }
+          SoundAdvice(mode: model.settings.soundMode, headphones: model.headphones)
           Button("置いたよ") { model.start() }
             .buttonStyle(PrimaryButtonStyle(height: 72, fontSize: 24))
           Button("次からはこの説明を省く") {

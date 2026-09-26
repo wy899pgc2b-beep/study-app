@@ -160,10 +160,11 @@ struct ResultView: View {
   private func scenarioCard(_ results: [PhaseResult]) -> some View {
     let judged = results.filter { $0.pass != nil }
     let passed = judged.filter { $0.pass == true }.count
+    let later: [String] = model.runner.scenarioRemaining.compactMap { id in Scenario.phases.first(where: { $0.id == id })?.label }
     return VStack(alignment: .leading, spacing: 14) {
       VStack(alignment: .leading, spacing: 4) {
         Text("検証モードの結果").font(AppFont.regular(14)).foregroundStyle(Palette.subInk)
-        Text("\(judged.count) 場面のうち \(passed) 場面が合格").font(AppFont.bold(24, relativeTo: .title))
+        Text(results.isEmpty ? "最後まで行った場面はないよ" : "\(judged.count) 場面のうち \(passed) 場面が合格").font(AppFont.bold(24, relativeTo: .title))
         Text("目安は 9 場面のうち 8 場面以上です。この結果は学習の記録には入りません")
           .font(AppFont.regular(13)).foregroundStyle(Palette.subInk).fixedSize(horizontal: false, vertical: true)
       }
@@ -172,6 +173,16 @@ struct ResultView: View {
           scenarioRow(i, r)
           if i < results.count - 1 { Divider().overlay(Palette.line) }
         }
+      }
+      if !later.isEmpty {
+        VStack(alignment: .leading, spacing: 6) {
+          Label("あとで行う場面", systemImage: "clock.arrow.circlepath").font(AppFont.bold(15))
+          Text(later.joined(separator: "・")).font(AppFont.regular(15))
+          Text("ホームの付箋から、残りの場面だけ行えるよ").font(AppFont.regular(13)).foregroundStyle(Palette.subInk)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Palette.sticky, in: RoundedRectangle(cornerRadius: 8))
       }
     }
     .card()

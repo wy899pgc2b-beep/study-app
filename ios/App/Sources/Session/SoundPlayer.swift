@@ -75,7 +75,8 @@ final class SoundPlayer {
 
   private func ringAlarm() {
     play([Tone(freq: 1320, sec: 0.25, volume: alarmVolume, next: 0.3), Tone(freq: 990, sec: 0.25, volume: alarmVolume, next: 0.25)])
-    alarmVolume = Swift.min(1, alarmVolume + 0.1)
+    // イヤホンでは耳のすぐそばで鳴るので、上げる上限を半分にする
+    alarmVolume = Swift.min(AudioRoute.headphonesConnected ? 0.5 : 1, alarmVolume + 0.1)
   }
 
   private func makeBuffer(_ tones: [Tone]) -> AVAudioPCMBuffer? {

@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import Observation
 import StudyCore
@@ -31,6 +32,19 @@ enum Grade: String, Codable, CaseIterable, Identifiable {
   }
 }
 
+/// 案内のしかた(決定事項 D-21)。消音では声も音も出さず、区切りを振動の回数で伝える
+enum SoundMode: String, Codable, CaseIterable {
+  case voice
+  case vibrate
+
+  var label: String {
+    switch self {
+    case .voice: "声と音"
+    case .vibrate: "消音(振動だけ)"
+    }
+  }
+}
+
 /// 学習の前に決めておく設定(設計書 3.24、決定事項 D-9)。端末に覚えておく。
 struct StudySettings: Codable, Equatable {
   var breakTimer = BreakTimer()
@@ -46,6 +60,11 @@ struct StudySettings: Codable, Equatable {
   var parentalConsent = false
   /// 映像の扱いに同意した日時
   var consentedAt: Date?
+  var soundMode: SoundMode = .voice
+  /// 検証モードで最後まで行った場面(id)。残りの場面は「あとで」行う
+  var scenarioDone: [String] = []
+  /// オンボーディングの後に、検証モードを勧めた
+  var scenarioInvited = false
 
   init() {}
 
@@ -60,6 +79,9 @@ struct StudySettings: Codable, Equatable {
     grade = try? c.decodeIfPresent(Grade.self, forKey: .grade)
     parentalConsent = try c.decodeIfPresent(Bool.self, forKey: .parentalConsent) ?? false
     consentedAt = try c.decodeIfPresent(Date.self, forKey: .consentedAt)
+    soundMode = (try? c.decodeIfPresent(SoundMode.self, forKey: .soundMode)) ?? .voice
+    scenarioDone = try c.decodeIfPresent([String].self, forKey: .scenarioDone) ?? []
+    scenarioInvited = try c.decodeIfPresent(Bool.self, forKey: .scenarioInvited) ?? false
   }
 
   private static let key = "studySettings"
@@ -79,6 +101,8 @@ struct StudySettings: Codable, Equatable {
 enum Screen: Equatable {
   /// 初回だけ(同意・学年・カメラの許可)
   case onboarding
+  /// オンボーディングの後に、検証モードを勧める(「あとで」にできる)
+  case scenarioInvite
   case home
   /// 置く前の説明(置き方の絵)
   case placement
@@ -110,7 +134,22 @@ final class AppModel {
     store?.recoverUnfinished()
     refreshToday()
     // 検証モードは、最後の場面が終わると自分で終わる
-    runner.onAutoFinish = { [weak self] in self?.screen = .result }
+    runner.onAutoFinish = { [weak self] in
+      self?.recordScenarioProgress()
+      self?.screen = .result
+    }
+    headphones = AudioRoute.headphonesConnected
+    NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] _ in
+      Task { @MainActor in self?.headphones = AudioRoute.headphonesConnected }
+    }
+  }
+
+  /// イヤホンがつながっているか(つながっていなければ、周りに人がいるときはイヤホンか消音を勧める)
+  private(set) var headphones = false
+
+  /// 検証モードでまだ最後まで行っていない場面(Scenario.phases の番号)
+  var scenarioPending: [Int] {
+    Scenario.phases.indices.filter { !settings.scenarioDone.contains(Scenario.phases[$0].id) }
   }
 
   /// 利用状況の記録(F-27。端末内だけ)
@@ -118,10 +157,17 @@ final class AppModel {
     store?.log(UsageEvent(name: name, at: Date(), properties: properties))
   }
 
-  /// オンボーディングを終えてホームへ
+  /// オンボーディングを終えて、検証モードを勧める
   func completeOnboarding() {
     update { $0.onboarded = true }
     usage("onboarding_complete", ["grade": settings.grade?.rawValue ?? ""])
+    screen = .scenarioInvite
+  }
+
+  /// 検証モードを「あとで」にする(ホームに付箋を残す)
+  func postponeScenario() {
+    update { $0.scenarioInvited = true }
+    usage("scenario_postponed", ["remaining": String(scenarioPending.count)])
     screen = .home
   }
 
@@ -158,10 +204,24 @@ final class AppModel {
     Task { await runner.start(settings: settings) }
   }
 
-  /// 検証モード:検証シナリオの 9 場面を行い、場面ごとの合否を出して記録を書き出す(MVP の設計 5 章 4)
-  func startScenario() {
+  /// 検証モード:検証シナリオの場面を行い、場面ごとの合否を出して記録を書き出す(MVP の設計 5 章 4)。
+  /// onlyPending のときは、まだ最後まで行っていない場面だけ行う
+  func startScenario(onlyPending: Bool = true) {
+    update { $0.scenarioInvited = true }
+    let pending = scenarioPending
+    let phases = onlyPending && !pending.isEmpty ? pending : Array(Scenario.phases.indices)
     screen = .session
-    Task { await runner.start(settings: settings, mode: .scenario) }
+    Task { await runner.start(settings: settings, mode: .scenario, scenarioPhases: phases) }
+  }
+
+  /// 検証モードで最後まで行った場面を覚える
+  private func recordScenarioProgress() {
+    guard runner.mode == .scenario else { return }
+    let done = runner.scenarioCompleted
+    update { s in
+      let added = done.filter { !s.scenarioDone.contains($0) }
+      s.scenarioDone += added
+    }
   }
 
   /// 設定の「記録を書き出す」
@@ -173,6 +233,7 @@ final class AppModel {
 
   func finish() {
     runner.finish()
+    recordScenarioProgress()
     screen = .result
   }
 

@@ -24,6 +24,7 @@ struct RootView: View {
       case .session: SessionView()
       case .result: ResultView()
       case .onboarding: OnboardingView()
+      case .scenarioInvite: ScenarioInviteView()
       }
     }
     // アプリを離れたら一時停止する(設計書 3.11)
