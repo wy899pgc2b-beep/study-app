@@ -1,3 +1,4 @@
+import Foundation
 import ManagedSettings
 
 /// 制限の画面のボタン。1 つめ(閉じる)はアプリを閉じる。2 つめは休憩する・あと 5 分使う・開く(厳しさと回数による)
@@ -21,7 +22,8 @@ final class ShieldActionExtension: ShieldActionDelegate {
     case .secondaryButtonPressed:
       // 描き直す(.defer):制限を外したときはそのままアプリが開き、6 秒待つときは待つ案内に変わる
       return RestrictionEngine.secondaryPressed(for: target, now: Date()) == .redraw ? .defer : .close
-    @unknown default:
+    default:
+      // 新しい OS で足されたボタン(使っていない)
       return .close
     }
   }
