@@ -1,0 +1,3 @@
+// Release のときのアプリの設定(TestFlight に送る版)。CocoaPods の設定(pod install で作られる)を先に読み込む
+#include? "../Pods/Target Support Files/Pods-StudyApp/Pods-StudyApp.release.xcconfig"
+#include "App.xcconfig"

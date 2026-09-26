@@ -1,4 +1,4 @@
-// アプリの版と Bundle ID(アプリの target だけに効く)。
+// アプリの版と Bundle ID(アプリの target だけに効く。Debug.xcconfig・Release.xcconfig が読み込む)。
 // TestFlight に送る流れ(.github/workflows/testflight.yml)が、送る前に Signing.xcconfig(署名の設定。リポジトリには入れない)を作る。
 MARKETING_VERSION = 0.1.0
 CURRENT_PROJECT_VERSION = 1

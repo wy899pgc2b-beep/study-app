@@ -1,0 +1,3 @@
+// Debug のときのアプリの設定。CocoaPods の設定(pod install で作られる)を先に読み込む
+#include? "../Pods/Target Support Files/Pods-StudyApp/Pods-StudyApp.debug.xcconfig"
+#include "App.xcconfig"

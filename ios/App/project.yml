@@ -60,8 +60,8 @@ targets:
         ITSAppUsesNonExemptEncryption: false
     # 版・Bundle ID・署名は xcconfig に置く(ここに書くと xcconfig より優先されてしまう)
     configFiles:
-      Debug: Config/App.xcconfig
-      Release: Config/App.xcconfig
+      Debug: Config/Debug.xcconfig
+      Release: Config/Release.xcconfig
     settings:
       base:
         TARGETED_DEVICE_FAMILY: "1"
