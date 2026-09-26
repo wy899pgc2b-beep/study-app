@@ -1,52 +1,52 @@
 #!/usr/bin/env python3
 """ツクエログのアプリアイコンを作る(決定事項 D-22)。
 
-シンプルさを追いつつ、アニメのタイトルロゴのように印象に残る見た目にする:
-  - 太い文字 1 字(「ツクエログ」の「ツ」)を少し傾ける
-  - 重ね方:ぼかした影 → 濃いふち → 立体の側面 → 白いふち → ランプの灯りの色のグラデーション → つや
-  - 背景は夜の机の紺色に、漫画の集中線(「集中」を表す)と、中心のやわらかい灯り
-  - キラッ(4 つの角の星)を 1 つ
+シンプルで、綺麗で美しく整った見た目にする(アニメ映画のタイトルのような上品さ):
+  - まっすぐ立てた明朝の文字 1 字(「ツクエログ」の「ツ」)を、真ん中に置く
+  - 文字は白から淡い金へのグラデーションと、やわらかい光。斜めに細い光の帯(箔押しのような)
+  - 文字を囲む細い金の輪(内側にもう 1 本の細い線)。輪の真上にキラッ 1 つ
+  - 背景は夕方から夜へ移る空(紺から青、下に灯りのような温かい光)と、左右対称の小さな星
 2 倍の大きさ(2048)で描いて 1024 に縮め、ふちをなめらかにする。透明な部分は作らない(App Store の決まり)。
 
-文字は Dela Gothic One(SIL Open Font License)。初めて動かすときに google/fonts から取ってくる(リポジトリには入れない)。
+文字は しっぽり明朝 B1 ExtraBold(SIL Open Font License)。初めて動かすときに google/fonts から取ってくる(リポジトリには入れない)。
 使い方(pillow・numpy・scipy が要る):
-  python3 make_icon.py                      # Resources/Assets.xcassets/AppIcon.appiconset/icon-1024.png を作り直す
-  python3 make_icon.py --variant b --out x.png   # ほかの案(a2:丸い「ツ」、b:「机」、c:「ツクエ」)
-  python3 make_icon.py --preview preview.png     # 角の丸い形で切った、ホーム画面の大きさの見本
+  python3 make_icon.py                                  # Resources/Assets.xcassets/AppIcon.appiconset/icon-1024.png を作り直す
+  python3 make_icon.py --glyph 机 --palette green --out x.png   # ほかの案(文字:ツ・机、色:twilight・green)
+  python3 make_icon.py --preview preview.png            # 角の丸い形で切った、ホーム画面の大きさの見本
 """
 
 import argparse
 import math
 import os
-import random
 import urllib.request
 
 import numpy as np
-from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageDraw, ImageFont
 from scipy import ndimage
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 APP = os.path.dirname(HERE)
 ICON = os.path.join(APP, "Resources/Assets.xcassets/AppIcon.appiconset/icon-1024.png")
 FONT_DIR = os.path.join(APP, ".icon-fonts")
-FONT_URLS = {
-    "DelaGothicOne-Regular.ttf": "https://raw.githubusercontent.com/google/fonts/main/ofl/delagothicone/DelaGothicOne-Regular.ttf",
-    "ZenMaruGothic-Black.ttf": "https://raw.githubusercontent.com/google/fonts/main/ofl/zenmarugothic/ZenMaruGothic-Black.ttf",
-}
+FONT = "ShipporiMinchoB1-ExtraBold.ttf"
+FONT_URL = "https://raw.githubusercontent.com/google/fonts/main/ofl/shipporiminchob1/ShipporiMinchoB1-ExtraBold.ttf"
 
 S = 2048  # 描く大きさ(書き出しは 1024)
+Y, X = np.mgrid[0:S, 0:S].astype(np.float32)
+CX, CY = S / 2, S / 2
 
-# 色(設計書 5.5 の「机と日誌」の色:夜の机の紺、ランプの灯り。赤は使わない)
-NAVY_TOP, NAVY_BOTTOM, NAVY_RAY, LAMP = 0x2A3E53, 0x121B27, 0x40607F, 0xE9B868
-AMBER_TOP, AMBER_BOTTOM, AMBER_SIDE = 0xFFE36E, 0xF28A12, 0x9A5410
-CREAM, INK = 0xFFF8E6, 0x0C1420
+# 金(輪と、緑の案の文字)と、淡い金(夕空の案の文字)
+GOLD = [(0.0, 0xFFF3CF), (0.42, 0xF3D183), (0.58, 0xE2AE55), (1.0, 0xC4892E)]
+PALE = [(0.0, 0xFFFFFF), (0.6, 0xFFF4DA), (1.0, 0xF5D9A2)]
+# 文字ごとの大きさと、見た目の中心に合わせる上下のずれ
+GLYPHS = {"ツ": (1060, 0.01), "机": (920, 0.015)}
 
 
-def font_path(name):
-    path = os.path.join(FONT_DIR, name)
+def font_path():
+    path = os.path.join(FONT_DIR, FONT)
     if not os.path.exists(path):
         os.makedirs(FONT_DIR, exist_ok=True)
-        urllib.request.urlretrieve(FONT_URLS[name], path)
+        urllib.request.urlretrieve(FONT_URL, path)
     return path
 
 
@@ -59,115 +59,95 @@ def over(base, color, alpha):
     return base * (1 - a) + color * a
 
 
-def glyph_layer(text, font, size, center, skew=0.0, angle=0.0):
-    """文字の形。字面の中心を center に合わせ、斜体(skew)と回転(angle。反時計回り)をかける"""
-    f = ImageFont.truetype(font_path(font), size)
+def stops(t, pairs):
+    """t(0〜1)の配列に、色の段階 [(位置, 色), ...] をなめらかにつける"""
+    out = np.zeros(t.shape + (3,), dtype=np.float32)
+    for (p0, c0), (p1, c1) in zip(pairs, pairs[1:]):
+        m = (t >= p0) & (t <= p1)
+        u = ((t - p0) / max(1e-6, p1 - p0))[..., None]
+        out[m] = (rgb(c0) * (1 - u) + rgb(c1) * u)[m]
+    out[t < pairs[0][0]] = rgb(pairs[0][1])
+    out[t > pairs[-1][0]] = rgb(pairs[-1][1])
+    return out
+
+
+def glyph(text, size, dy):
+    """文字の形(0〜1)。字面の中心を、真ん中から dy だけ下に置く"""
+    f = ImageFont.truetype(font_path(), size)
     layer = Image.new("L", (S, S), 0)
     d = ImageDraw.Draw(layer)
     l, t, r, b = d.textbbox((0, 0), text, font=f)
-    cx, cy = center
-    d.text((cx - (l + r) / 2, cy - (t + b) / 2), text, font=f, fill=255)
-    if skew:
-        layer = layer.transform((S, S), Image.AFFINE, (1, skew, -skew * cy, 0, 1, 0), resample=Image.BICUBIC)
-    if angle:
-        layer = layer.rotate(angle, resample=Image.BICUBIC, center=(cx, cy))
-    return layer
+    d.text((CX - (l + r) / 2, CY + S * dy - (t + b) / 2), text, font=f, fill=255)
+    return np.asarray(layer, dtype=np.float32) / 255
 
 
-def dilate(alpha, r):
-    """形を半径 r だけ太らせる(なめらかなふち)"""
-    dist = ndimage.distance_transform_edt(alpha < 0.5)
-    return np.clip(r + 0.5 - dist, 0, 1)
+def ring(radius, width, gap_center, gap_r):
+    """細い輪。キラッの後ろは切っておく"""
+    a = np.clip(width / 2 + 0.5 - np.abs(np.hypot(X - CX, Y - CY) - radius), 0, 1)
+    return a * np.clip((np.hypot(X - gap_center[0], Y - gap_center[1]) - gap_r) / 6, 0, 1)
 
 
-def shift(a, dx, dy):
-    return ndimage.shift(a, (dy, dx), order=1, mode="constant", cval=0)
-
-
-def background(seed):
-    """紺のグラデーション、中心の灯り、集中線(外から中心へ細くなる線。中心の近くは空ける)"""
-    y, x = np.mgrid[0:S, 0:S].astype(np.float32)
-    cx, cy = S / 2, S * 0.48
-    dist = np.hypot(x - cx, y - cy)
-    t = np.clip(dist / (S * 0.75), 0, 1)[..., None]
-    img = rgb(NAVY_TOP) * (1 - t) + rgb(NAVY_BOTTOM) * t
-    img = over(img, rgb(LAMP), np.clip(1 - dist / (S * 0.42), 0, 1) ** 2 * 0.35)
-    rays = Image.new("L", (S, S), 0)
-    d = ImageDraw.Draw(rays)
-    rnd = random.Random(seed)
-    n = 72
-    for i in range(n):
-        a = (i + rnd.uniform(-0.35, 0.35)) / n * 2 * math.pi
-        w = rnd.uniform(0.010, 0.030)
-        inner = S * rnd.uniform(0.36, 0.46)
-        outer = S * 1.1
-        d.polygon(
-            [
-                (cx + inner * math.cos(a), cy + inner * math.sin(a)),
-                (cx + outer * math.cos(a - w), cy + outer * math.sin(a - w)),
-                (cx + outer * math.cos(a + w), cy + outer * math.sin(a + w)),
-            ],
-            fill=255,
-        )
-    fade = np.clip((dist - S * 0.34) / (S * 0.25), 0, 1)
-    return over(img, rgb(NAVY_RAY), np.asarray(rays, dtype=np.float32) / 255 * fade * 0.55)
-
-
-def title(img, glyph, inner_r=24, outer_w=30, depth=(16, 34), steps=16):
-    """アニメのタイトルロゴの重ね方"""
-    a = np.asarray(glyph, dtype=np.float32) / 255
-    a_inner = dilate(a, inner_r)
-    side = np.zeros_like(a)
-    for k in range(1, steps + 1):
-        side = np.maximum(side, shift(a_inner, depth[0] * k / steps, depth[1] * k / steps))
-    a_outer = dilate(np.maximum(a_inner, side), outer_w)
-    drop = ndimage.gaussian_filter(shift(a_outer, 10, 26), 22)
-    img = over(img, np.zeros(3, dtype=np.float32), drop * 0.55)
-    img = over(img, rgb(INK), a_outer)
-    img = over(img, rgb(AMBER_SIDE), side)
-    img = over(img, rgb(CREAM), a_inner)
-    rows = np.nonzero(a.max(axis=1) > 0.5)[0]
-    top, bottom = rows.min(), rows.max()
-    t = np.clip((np.arange(S, dtype=np.float32) - top) / max(1, bottom - top), 0, 1)[:, None, None]
-    img = img * (1 - a[..., None]) + (rgb(AMBER_TOP) * (1 - t) + rgb(AMBER_BOTTOM) * t) * a[..., None]
-    return over(img, rgb(0xFFFFFF), a * np.clip(1 - t[..., 0] / 0.45, 0, 1) * 0.3)
-
-
-def sparkle(img, cx, cy, r):
-    """キラッ(4 つの角の星)と、まわりの光"""
+def sparkle(img, cx, cy, r, inner):
+    """キラッ(4 つの角の細い星)と、まわりの光"""
     pts = []
     for k in range(8):
         ang = k * math.pi / 4 - math.pi / 2
-        rr = r if k % 2 == 0 else r * 0.2
+        rr = r if k % 2 == 0 else r * inner
         pts.append((cx + rr * math.cos(ang), cy + rr * math.sin(ang)))
     m = Image.new("L", (S, S), 0)
     ImageDraw.Draw(m).polygon(pts, fill=255)
-    halo = np.asarray(m.filter(ImageFilter.GaussianBlur(r * 0.35)), dtype=np.float32) / 255
-    img = over(img, rgb(0xFFE9A8), np.clip(halo * 1.6, 0, 1) * 0.6)
-    return over(img, rgb(0xFFFFFF), np.asarray(m, dtype=np.float32) / 255)
+    m = np.asarray(m, dtype=np.float32) / 255
+    img = over(img, rgb(0xFFF1C8), np.clip(ndimage.gaussian_filter(m, r * 0.5) * 1.4, 0, 1) * 0.5)
+    return over(img, rgb(0xFFFFFF), m)
 
 
-def render(variant):
-    if variant in ("a", "a2"):
-        img = background(7)
-        font, size = ("DelaGothicOne-Regular.ttf", 1240) if variant == "a" else ("ZenMaruGothic-Black.ttf", 1240)
-        img = title(img, glyph_layer("ツ", font, size, (S * 0.48, S * 0.51), skew=0.1, angle=5))
-        return sparkle(img, S * 0.78, S * 0.23, 150)
-    if variant == "b":
-        img = background(11)
-        img = title(img, glyph_layer("机", "DelaGothicOne-Regular.ttf", 1040, (S * 0.49, S * 0.49), skew=0.1, angle=4))
-        return sparkle(img, S * 0.8, S * 0.21, 140)
-    if variant == "c":
-        img = background(3)
-        g = Image.new("L", (S, S), 0)
-        for text, size, c, ang in (("ツ", 660, (0.26, 0.47), 8), ("ク", 540, (0.52, 0.43), -4), ("エ", 540, (0.76, 0.53), 6)):
-            g = ImageChops.lighter(g, glyph_layer(text, "DelaGothicOne-Regular.ttf", size, (S * c[0], S * c[1]), skew=0.12, angle=ang))
-        img = title(img, g, inner_r=18, outer_w=24, depth=(12, 26))
-        return sparkle(img, S * 0.82, S * 0.2, 110)
-    raise SystemExit(f"案がありません: {variant}")
+def foil(img, alpha, pairs, top, bottom, sheen):
+    """箔押しのような色:上から下へのグラデーションと、斜めの細い光の帯"""
+    t = np.clip((Y - top) / max(1, bottom - top), 0, 1)
+    col = stops(t, pairs)
+    band = np.exp(-(((X - CX) * 0.55 + (Y - CY) * 0.85 + S * 0.05) / (S * 0.06)) ** 2) * sheen
+    col = col * (1 - band[..., None]) + band[..., None]
+    return img * (1 - alpha[..., None]) + col * alpha[..., None]
 
 
-def to_image(img):
+def background(palette):
+    t = np.clip(Y / S, 0, 1)
+    if palette == "twilight":
+        # 夕方から夜へ移る空。下には、机の灯りのような温かい光
+        img = stops(t, [(0.0, 0x0E1830), (0.5, 0x1F3560), (0.85, 0x44558A), (1.0, 0x7A6C9C)])
+        glow = np.clip(1 - np.hypot(X - CX, Y - S * 1.02) / (S * 0.7), 0, 1) ** 2
+        img = over(img, rgb(0xF6C98E), glow * 0.55)
+    else:
+        # 日誌の表紙のような深い緑(アプリの基本の色)
+        img = stops(t, [(0.0, 0x2F6B5A), (1.0, 0x173E34)])
+        light = np.clip(1 - np.hypot(X - S * 0.35, Y - S * 0.25) / (S * 0.8), 0, 1) ** 2
+        img = over(img, rgb(0x4E8F79), light * 0.35)
+    # 外側を少し暗くして、真ん中に目が行くようにする
+    vig = np.clip((np.hypot(X - CX, Y - CY) - S * 0.45) / (S * 0.35), 0, 1)
+    return over(img, np.zeros(3, dtype=np.float32), vig * 0.25)
+
+
+def render(text="ツ", palette="twilight"):
+    size, dy = GLYPHS[text]
+    img = background(palette)
+    a = glyph(text, size, dy)
+    rows = np.nonzero(a.max(axis=1) > 0.5)[0]
+    radius = S * 0.385
+    spark = (CX, CY - radius)
+    outer = ring(radius, S * 0.012, spark, S * 0.05)
+    inner = ring(radius - S * 0.028, S * 0.0045, spark, S * 0.07)
+    # 文字と輪の、やわらかい影と、文字のまわりの光
+    shadow = ndimage.gaussian_filter(np.maximum(a, outer), 14)
+    img = over(img, np.zeros(3, dtype=np.float32), ndimage.shift(shadow, (18, 0), order=1) * 0.35)
+    img = over(img, rgb(0xFFE7B0), np.clip(ndimage.gaussian_filter(a, 40) * 1.2, 0, 1) * 0.28)
+    img = foil(img, outer, GOLD, CY - radius, CY + radius, sheen=0.2)
+    img = foil(img, inner * 0.8, GOLD, CY - radius, CY + radius, sheen=0.0)
+    img = foil(img, a, PALE if palette == "twilight" else GOLD, rows.min(), rows.max(), sheen=0.28)
+    img = sparkle(img, spark[0], spark[1], S * 0.07, 0.13)
+    if palette == "twilight":
+        # 左右対称の小さな星(輪にかからない所)
+        for x, y, r in ((0.17, 0.15, 0.017), (0.83, 0.15, 0.017), (0.09, 0.3, 0.009), (0.91, 0.3, 0.009)):
+            img = sparkle(img, S * x, S * y, S * r, 0.18)
     out = Image.fromarray(np.clip(img * 255 + 0.5, 0, 255).astype(np.uint8), "RGB")
     return out.resize((1024, 1024), Image.LANCZOS)
 
@@ -200,11 +180,12 @@ def preview(icon, path):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--variant", default="a", choices=["a", "a2", "b", "c"])
+    p.add_argument("--glyph", default="ツ", choices=sorted(GLYPHS))
+    p.add_argument("--palette", default="twilight", choices=["twilight", "green"])
     p.add_argument("--out", default=ICON)
     p.add_argument("--preview")
     a = p.parse_args()
-    icon = to_image(render(a.variant))
+    icon = render(a.glyph, a.palette)
     icon.save(a.out, optimize=True)
     if a.preview:
         preview(icon, a.preview)

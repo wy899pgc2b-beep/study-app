@@ -81,7 +81,7 @@ node tools/export-parity-fixtures.mjs   # 突き合わせ用のデータを作�
 ### 版と署名
 
 - `Config/App.xcconfig`:アプリの版(MARKETING_VERSION)、ビルド番号、Bundle ID。アプリの target だけに効く。
-- `Resources/Assets.xcassets`:アプリのアイコン(決定事項 D-22)。シンプルさを追いつつ、アニメのタイトルロゴのように印象に残る見た目:太い「ツ」1 字に二重のふち・立体の側面・ランプの灯りの色のグラデーション・キラッ。背景は夜の机の紺に、漫画の集中線(「集中」を表す)。`scripts/make_icon.py` で作る(文字は Dela Gothic One。SIL Open Font License。作るときに取ってくる)。
+- `Resources/Assets.xcassets`:アプリのアイコン(決定事項 D-22)。シンプルで、綺麗で美しく整った見た目(アニメ映画のタイトルのような上品さ):まっすぐ立てた明朝の「ツ」1 字を、細い金の輪で囲み、輪の真上にキラッ。背景は夕方から夜へ移る空。`scripts/make_icon.py` で作る(文字は しっぽり明朝 B1。SIL Open Font License。作るときに取ってくる。`--glyph 机`・`--palette green` でほかの案も作れる)。
 - `Resources/PrivacyInfo.xcprivacy`:プライバシーの申告(追跡しない。端末の外に送るデータはない)。
 - `scripts/asc_signing.py`:TestFlight に送るときの署名を、App Store Connect の API で用意する。配布用の証明書の鍵は API キーから毎回同じものを作るので、鍵をどこにも保存せず、証明書を取り消さずに使い続けられる。`self-test` で作り方だけを確かめられる。
 
